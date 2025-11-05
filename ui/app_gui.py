@@ -30,6 +30,10 @@ class NaverAutoGUI:
         
         # 상태 변수
         self.is_running = False
+        self.is_paused = False
+        self.should_stop = False
+        self.work_thread = None
+        self.work_control = {'stop': False, 'pause': False}  # 작업 제어 플래그
         self.success_count = 0
         self.fail_count = 0
         self.total_work_count = 0  # 전체 작업 수
@@ -91,7 +95,7 @@ class NaverAutoGUI:
         
         # 서로이웃 추가 탭
         neighbor_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(neighbor_tab, text="서로이웃 추가")
+        self.notebook.add(neighbor_tab, text="직업내용")
         neighbor_tab.columnconfigure(0, weight=1)
         
         neighbor_frame = ttk.Frame(neighbor_tab)
@@ -104,60 +108,25 @@ class NaverAutoGUI:
         
         self.include_neighbor_var = tk.BooleanVar(value=False)
         self.mutual_only_var = tk.BooleanVar(value=True)
+        self.like_var = tk.BooleanVar(value=False)
+        self.comment_var = tk.BooleanVar(value=False)
         
+        # 첫 번째 줄: 이웃 추가 옵션
         ttk.Checkbutton(option_frame, text="이웃추가 포함", variable=self.include_neighbor_var).grid(row=0, column=0, padx=5, sticky=tk.W)
         ttk.Checkbutton(option_frame, text="서로이웃만", variable=self.mutual_only_var).grid(row=0, column=1, padx=5, sticky=tk.W)
+        
+        # 두 번째 줄: 공감 및 댓글 옵션
+        ttk.Checkbutton(option_frame, text="공감", variable=self.like_var).grid(row=1, column=0, padx=5, pady=(5, 0), sticky=tk.W)
+        ttk.Checkbutton(option_frame, text="댓글 작성", variable=self.comment_var).grid(row=1, column=1, padx=5, pady=(5, 0), sticky=tk.W)
         
         # 서로이웃 추가 수량 입력
         count_frame = ttk.Frame(neighbor_frame)
         count_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=10)
         
-        ttk.Label(count_frame, text="서로이웃 추가 수량:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        ttk.Label(count_frame, text="작업수량:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
         self.neighbor_count_entry = ttk.Entry(count_frame, width=10)
         self.neighbor_count_entry.insert(0, "10")  # 기본값 10
         self.neighbor_count_entry.grid(row=0, column=1, padx=5, sticky=tk.W)
-        
-        # 시작 버튼
-        btn_frame = ttk.Frame(neighbor_frame)
-        btn_frame.grid(row=2, column=0, pady=10)
-        
-        ttk.Button(btn_frame, text="서로이웃 추가 시작", command=self._start_neighbor_add, width=20).pack()
-        
-        # 공감 탭
-        like_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(like_tab, text="공감")
-        like_tab.columnconfigure(0, weight=1)
-        
-        like_frame = ttk.Frame(like_tab)
-        like_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
-        like_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(like_frame, text="URL 파일:").grid(row=0, column=0, padx=(0, 10), sticky=tk.W)
-        self.like_url_entry = ttk.Entry(like_frame, width=40)
-        self.like_url_entry.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
-        self.like_url_entry.insert(0, "URL 목록 파일 선택...")
-        self.like_url_entry.config(state=tk.DISABLED)
-        
-        ttk.Button(like_frame, text="파일 선택", command=self._select_like_file).grid(row=0, column=2, padx=5)
-        ttk.Button(like_frame, text="시작", command=self._start_like).grid(row=0, column=3, padx=5)
-        
-        # 댓글 작성 탭
-        comment_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(comment_tab, text="댓글 작성")
-        comment_tab.columnconfigure(0, weight=1)
-        
-        comment_frame = ttk.Frame(comment_tab)
-        comment_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
-        comment_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(comment_frame, text="URL 파일:").grid(row=0, column=0, padx=(0, 10), sticky=tk.W)
-        self.comment_url_entry = ttk.Entry(comment_frame, width=40)
-        self.comment_url_entry.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
-        self.comment_url_entry.insert(0, "URL 목록 파일 선택...")
-        self.comment_url_entry.config(state=tk.DISABLED)
-        
-        ttk.Button(comment_frame, text="파일 선택", command=self._select_comment_file).grid(row=0, column=2, padx=5)
-        ttk.Button(comment_frame, text="시작", command=self._start_comment).grid(row=0, column=3, padx=5)
         
         # 3. 하단: 작업 제어, 진행상황, 로그 (세로 배치)
         bottom_frame = ttk.Frame(main_frame)
@@ -183,10 +152,10 @@ class NaverAutoGUI:
         
         ttk.Label(speed_frame, text="작업 속도 (딜레이):").grid(row=0, column=0, padx=(0, 10), sticky=tk.W)
         self.speed_scale = ttk.Scale(speed_frame, from_=5, to=60, orient=tk.HORIZONTAL, length=200)
-        self.speed_scale.set(30)  # 기본값 30초
+        self.speed_scale.set(5)  # 기본값 5초
         self.speed_scale.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
         
-        self.speed_label = ttk.Label(speed_frame, text="30.0초")
+        self.speed_label = ttk.Label(speed_frame, text="5.0초")
         self.speed_label.grid(row=0, column=2, padx=5)
         self.speed_scale.configure(command=self._update_speed_label)
         
@@ -235,6 +204,13 @@ class NaverAutoGUI:
         
         self.progress_label = ttk.Label(progress_bar_frame, textvariable=self.progress_var)
         self.progress_label.grid(row=0, column=1)
+        
+        # 작업시작 버튼 (로그 위)
+        start_btn_frame = ttk.Frame(bottom_frame)
+        start_btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        self.start_btn = ttk.Button(start_btn_frame, text="작업시작", command=self._start_neighbor_add, width=20)
+        self.start_btn.pack()
         
         # 로그 표시 섹션 (더 넓게)
         log_frame = ttk.LabelFrame(bottom_frame, text="작업 로그", padding="10")
@@ -336,31 +312,41 @@ class NaverAutoGUI:
             if neighbor_count <= 0:
                 raise ValueError("수량은 1 이상이어야 합니다.")
         except ValueError as e:
-            self._log_message(f"오류: 서로이웃 추가 수량을 올바르게 입력해주세요. (1 이상의 숫자)")
+            self._log_message(f"오류: 작업수량을 올바르게 입력해주세요. (1 이상의 숫자)")
             return
         
         # 옵션 읽기
         include_neighbor = self.include_neighbor_var.get()
         mutual_only = self.mutual_only_var.get()
+        like_enabled = self.like_var.get()
+        comment_enabled = self.comment_var.get()
         delay = float(self.speed_scale.get())
         
         self._log_message("통합 작업을 시작합니다 (로그인 → 검색 → 서로이웃 추가)...")
-        self._log_message(f"옵션 - 이웃추가 포함: {include_neighbor}, 서로이웃만: {mutual_only}")
-        self._log_message(f"서로이웃 추가 수량: {neighbor_count}개")
+        self._log_message(f"옵션 - 이웃추가 포함: {include_neighbor}, 서로이웃만: {mutual_only}, 공감: {like_enabled}, 댓글 작성: {comment_enabled}")
+        self._log_message(f"작업수량: {neighbor_count}개")
+        
+        # 작업 제어 상태 초기화
+        self.is_running = True
+        self.is_paused = False
+        self.should_stop = False
+        self.work_control['stop'] = False
+        self.work_control['pause'] = False
         
         # 작업 버튼 활성화
         self.stop_btn.config(state=tk.NORMAL)
-        self.is_running = True
+        self.pause_btn.config(state=tk.NORMAL)
+        self.resume_btn.config(state=tk.DISABLED)
         
         # 별도 스레드에서 통합 작업 실행
-        work_thread = threading.Thread(
+        self.work_thread = threading.Thread(
             target=self._perform_full_workflow,
-            args=(username, password, search_keyword, include_neighbor, mutual_only, delay, neighbor_count),
+            args=(username, password, search_keyword, include_neighbor, mutual_only, delay, neighbor_count, like_enabled, comment_enabled),
             daemon=True
         )
-        work_thread.start()
+        self.work_thread.start()
     
-    def _perform_full_workflow(self, username, password, keyword, include_neighbor, mutual_only, delay, neighbor_count):
+    def _perform_full_workflow(self, username, password, keyword, include_neighbor, mutual_only, delay, neighbor_count, like_enabled=False, comment_enabled=False):
         """전체 워크플로우 수행 (로그인 → 검색 → 서로이웃 추가) (별도 스레드)"""
         try:
             # 1. 로그인 수행
@@ -388,6 +374,12 @@ class NaverAutoGUI:
             
             self.root.after(0, lambda: self._log_message(f"검색 완료: '{keyword}'"))
             
+            # 공감/댓글 옵션 로그 (기능 구현은 나중에)
+            if like_enabled:
+                self.root.after(0, lambda: self._log_message("공감 기능이 체크되어 있습니다. (기능 구현 예정)"))
+            if comment_enabled:
+                self.root.after(0, lambda: self._log_message("댓글 작성 기능이 체크되어 있습니다. (기능 구현 예정)"))
+            
             # 3. 서로이웃 추가 작업 수행
             self.root.after(0, lambda: self._log_message(f"서로이웃 추가 작업을 시작합니다... (대상: {neighbor_count}개)"))
             
@@ -406,13 +398,14 @@ class NaverAutoGUI:
             # NeighborAdd 인스턴스 생성
             neighbor_add = NeighborAdd(self.naver_login.driver)
             
-            # 작업 시작 (진행 상황 콜백 전달)
+            # 작업 시작 (진행 상황 콜백 및 작업 제어 전달)
             result = neighbor_add.start_neighbor_add_work(
                 include_neighbor=include_neighbor,
                 mutual_only=mutual_only,
                 max_posts=neighbor_count,  # 사용자가 입력한 수량만큼 처리
                 delay=delay,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                work_control=self.work_control  # 작업 제어 플래그 전달
             )
             
             # 최종 결과 업데이트
@@ -426,14 +419,28 @@ class NaverAutoGUI:
                 self.root.after(0, lambda: self._log_message(f"성공: {result['success_count']}개 (서로이웃: {result.get('mutual_count', 0)}개, 일반이웃: {result.get('neighbor_count', 0)}개)"))
                 self.root.after(0, lambda: self._log_message(f"실패: {result['fail_count']}개"))
             else:
-                self.root.after(0, lambda: self._log_message(f"작업 실패: {result['message']}"))
+                # 작업 중지 등으로 인한 실패인 경우에도 진행상황 업데이트
+                if 'success_count' in result and 'total' in result:
+                    self.root.after(0, lambda: self._update_progress(
+                        result.get('success_count', 0), 
+                        result.get('fail_count', 0), 
+                        result.get('total', 0)
+                    ))
+                    if result.get('success_count', 0) > 0 or result.get('fail_count', 0) > 0:
+                        self.root.after(0, lambda: self._log_message(f"작업 중지: 처리된 작업 {result.get('success_count', 0) + result.get('fail_count', 0)}개"))
+                        self.root.after(0, lambda: self._log_message(f"성공: {result.get('success_count', 0)}개, 실패: {result.get('fail_count', 0)}개"))
+                self.root.after(0, lambda: self._log_message(f"작업 상태: {result.get('message', '알 수 없는 오류')}"))
         
         except Exception as e:
             self.root.after(0, lambda: self._log_message(f"오류 발생: {str(e)}"))
             self.root.after(0, lambda: self.login_status_label.config(text="로그인 상태: 오류 발생", foreground="red"))
         finally:
             self.is_running = False
+            self.is_paused = False
+            self.should_stop = False
             self.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
+            self.root.after(0, lambda: self.pause_btn.config(state=tk.DISABLED))
+            self.root.after(0, lambda: self.resume_btn.config(state=tk.DISABLED))
     
     def _start_like(self):
         """공감(좋아요) 시작 (기능 미구현)"""
@@ -444,16 +451,34 @@ class NaverAutoGUI:
         pass
     
     def _stop_work(self):
-        """작업 중지 (기능 미구현)"""
-        pass
+        """작업 중지"""
+        if self.is_running:
+            self.should_stop = True
+            self.work_control['stop'] = True
+            self.work_control['pause'] = False
+            self.is_paused = False
+            self._log_message("작업 중지 요청...")
+            self.stop_btn.config(state=tk.DISABLED)
+            self.pause_btn.config(state=tk.DISABLED)
+            self.resume_btn.config(state=tk.DISABLED)
     
     def _pause_work(self):
-        """작업 일시정지 (기능 미구현)"""
-        pass
+        """작업 일시정지"""
+        if self.is_running and not self.is_paused:
+            self.is_paused = True
+            self.work_control['pause'] = True
+            self._log_message("작업 일시정지...")
+            self.pause_btn.config(state=tk.DISABLED)
+            self.resume_btn.config(state=tk.NORMAL)
     
     def _resume_work(self):
-        """작업 재시작 (기능 미구현)"""
-        pass
+        """작업 재시작"""
+        if self.is_running and self.is_paused:
+            self.is_paused = False
+            self.work_control['pause'] = False
+            self._log_message("작업 재시작...")
+            self.pause_btn.config(state=tk.NORMAL)
+            self.resume_btn.config(state=tk.DISABLED)
     
     def _update_speed_label(self, value):
         """속도 슬라이더 레이블 업데이트"""

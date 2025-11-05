@@ -629,7 +629,7 @@ class NeighborAdd:
             self.close_current_tab()
             return {'success': False, 'type': 'failed', 'reason': f'오류: {str(e)}'}
     
-    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None):
+    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None):
         """
         서로이웃 추가 작업 시작
         
@@ -639,6 +639,7 @@ class NeighborAdd:
             max_posts: 최대 처리할 포스트 수
             delay: 각 작업 사이 딜레이 (초)
             progress_callback: 진행 상황 업데이트 콜백 함수 (success_count, fail_count, current_total, max_total)
+            work_control: 작업 제어 딕셔너리 {'stop': bool, 'pause': bool}
         
         Returns:
             dict: 작업 결과
@@ -664,6 +665,35 @@ class NeighborAdd:
             
             for i, post in enumerate(posts, 1):
                 try:
+                    # 작업 중지 체크
+                    if work_control and work_control.get('stop', False):
+                        return {
+                            'success': False,
+                            'message': '사용자에 의해 작업이 중지되었습니다.',
+                            'total': total_posts,
+                            'success_count': success_count,
+                            'fail_count': fail_count,
+                            'mutual_count': mutual_count,
+                            'neighbor_count': neighbor_count
+                        }
+                    
+                    # 작업 일시정지 체크 (일시정지가 해제될 때까지 대기)
+                    if work_control and work_control.get('pause', False):
+                        while work_control.get('pause', False) and not work_control.get('stop', False):
+                            time.sleep(0.5)  # 0.5초마다 일시정지 상태 확인
+                        
+                        # 일시정지 중에 중지 요청이 있었다면 중지
+                        if work_control.get('stop', False):
+                            return {
+                                'success': False,
+                                'message': '사용자에 의해 작업이 중지되었습니다.',
+                                'total': total_posts,
+                                'success_count': success_count,
+                                'fail_count': fail_count,
+                                'mutual_count': mutual_count,
+                                'neighbor_count': neighbor_count
+                            }
+                    
                     # 검색 결과 페이지로 돌아가기 (첫 번째 포스트가 아니고 새 탭이 열렸다면)
                     if i > 1 and len(self.driver.window_handles) > 1:
                         self.driver.switch_to.window(self.driver.window_handles[0])
@@ -691,7 +721,35 @@ class NeighborAdd:
                     
                     # 딜레이 (마지막 포스트 제외)
                     if i < len(posts):
-                        time.sleep(delay)
+                        # 딜레이 중에도 중지/일시정지 체크
+                        elapsed = 0
+                        check_interval = 0.5  # 0.5초마다 체크
+                        while elapsed < delay:
+                            if work_control and work_control.get('stop', False):
+                                return {
+                                    'success': False,
+                                    'message': '사용자에 의해 작업이 중지되었습니다.',
+                                    'total': total_posts,
+                                    'success_count': success_count,
+                                    'fail_count': fail_count,
+                                    'mutual_count': mutual_count,
+                                    'neighbor_count': neighbor_count
+                                }
+                            if work_control and work_control.get('pause', False):
+                                while work_control.get('pause', False) and not work_control.get('stop', False):
+                                    time.sleep(check_interval)
+                                if work_control.get('stop', False):
+                                    return {
+                                        'success': False,
+                                        'message': '사용자에 의해 작업이 중지되었습니다.',
+                                        'total': total_posts,
+                                        'success_count': success_count,
+                                        'fail_count': fail_count,
+                                        'mutual_count': mutual_count,
+                                        'neighbor_count': neighbor_count
+                                    }
+                            time.sleep(min(check_interval, delay - elapsed))
+                            elapsed += check_interval
                 
                 except Exception as e:
                     fail_count += 1
