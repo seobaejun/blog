@@ -5,6 +5,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
+from tkinter import filedialog
 import sys
 from pathlib import Path
 import threading
@@ -127,6 +128,17 @@ class NaverAutoGUI:
         self.neighbor_count_entry = ttk.Entry(count_frame, width=10)
         self.neighbor_count_entry.insert(0, "10")  # 기본값 10
         self.neighbor_count_entry.grid(row=0, column=1, padx=5, sticky=tk.W)
+        
+        # 댓글 파일 선택 섹션
+        comment_file_frame = ttk.Frame(neighbor_frame)
+        comment_file_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        comment_file_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(comment_file_frame, text="댓글 파일:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        self.comment_file_path_var = tk.StringVar()
+        self.comment_file_entry = ttk.Entry(comment_file_frame, textvariable=self.comment_file_path_var, state=tk.DISABLED, width=30)
+        self.comment_file_entry.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
+        ttk.Button(comment_file_frame, text="파일 선택", command=self._select_comment_file, width=10).grid(row=0, column=2, padx=5, sticky=tk.W)
         
         # 3. 하단: 작업 제어, 진행상황, 로그 (세로 배치)
         bottom_frame = ttk.Frame(main_frame)
@@ -288,8 +300,13 @@ class NaverAutoGUI:
         pass
     
     def _select_comment_file(self):
-        """댓글 작성 대상 파일 선택 (기능 미구현)"""
-        pass
+        """댓글 작성 대상 파일 선택"""
+        file_path = filedialog.askopenfilename(
+            title="댓글 파일 선택",
+            filetypes=[("텍스트 파일", "*.txt"), ("모든 파일", "*.*")]
+        )
+        if file_path:
+            self.comment_file_path_var.set(file_path)
     
     def _start_neighbor_add(self):
         """서로이웃 추가 시작 (로그인 + 검색 + 서로이웃 추가 통합)"""
@@ -320,10 +337,16 @@ class NaverAutoGUI:
         mutual_only = self.mutual_only_var.get()
         like_enabled = self.like_var.get()
         comment_enabled = self.comment_var.get()
+        comment_file_path = self.comment_file_path_var.get().strip() if comment_enabled else None
         delay = float(self.speed_scale.get())
         
         self._log_message("통합 작업을 시작합니다 (로그인 → 검색 → 서로이웃 추가)...")
         self._log_message(f"옵션 - 이웃추가 포함: {include_neighbor}, 서로이웃만: {mutual_only}, 공감: {like_enabled}, 댓글 작성: {comment_enabled}")
+        if comment_enabled:
+            if comment_file_path:
+                self._log_message(f"댓글 파일: {comment_file_path}")
+            else:
+                self._log_message("댓글 파일이 선택되지 않았습니다. 기본 댓글을 사용합니다.")
         self._log_message(f"작업수량: {neighbor_count}개")
         
         # 작업 제어 상태 초기화
@@ -341,12 +364,12 @@ class NaverAutoGUI:
         # 별도 스레드에서 통합 작업 실행
         self.work_thread = threading.Thread(
             target=self._perform_full_workflow,
-            args=(username, password, search_keyword, include_neighbor, mutual_only, delay, neighbor_count, like_enabled, comment_enabled),
+            args=(username, password, search_keyword, include_neighbor, mutual_only, delay, neighbor_count, like_enabled, comment_enabled, comment_file_path),
             daemon=True
         )
         self.work_thread.start()
     
-    def _perform_full_workflow(self, username, password, keyword, include_neighbor, mutual_only, delay, neighbor_count, like_enabled=False, comment_enabled=False):
+    def _perform_full_workflow(self, username, password, keyword, include_neighbor, mutual_only, delay, neighbor_count, like_enabled=False, comment_enabled=False, comment_file_path=None):
         """전체 워크플로우 수행 (로그인 → 검색 → 서로이웃 추가) (별도 스레드)"""
         try:
             # 1. 로그인 수행
@@ -378,7 +401,10 @@ class NaverAutoGUI:
             if like_enabled:
                 self.root.after(0, lambda: self._log_message("공감 기능이 활성화되어 있습니다."))
             if comment_enabled:
-                self.root.after(0, lambda: self._log_message("댓글 작성 기능이 체크되어 있습니다. (기능 구현 예정)"))
+                if comment_file_path:
+                    self.root.after(0, lambda: self._log_message(f"댓글 작성 기능이 활성화되어 있습니다. (파일: {comment_file_path})"))
+                else:
+                    self.root.after(0, lambda: self._log_message("댓글 작성 기능이 활성화되어 있습니다. (기본 댓글 사용)"))
             
             # 3. 서로이웃 추가 작업 수행
             self.root.after(0, lambda: self._log_message(f"서로이웃 추가 작업을 시작합니다... (대상: {neighbor_count}개)"))
@@ -412,6 +438,8 @@ class NaverAutoGUI:
                 progress_callback=progress_callback,
                 work_control=self.work_control,  # 작업 제어 플래그 전달
                 like_enabled=like_enabled,
+                comment_enabled=comment_enabled,
+                comment_file_path=comment_file_path,
                 log_callback=log_callback  # 로그 콜백 전달
             )
             
@@ -424,12 +452,15 @@ class NaverAutoGUI:
                 ))
                 self.root.after(0, lambda: self._log_message(f"작업 완료: 총 {result['total']}개"))
                 like_count = result.get('like_count', 0)
+                comment_count = result.get('comment_count', 0)
                 mutual_count = result.get('mutual_count', 0)
                 neighbor_count = result.get('neighbor_count', 0)
                 
                 result_parts = []
                 if like_count > 0:
                     result_parts.append(f"공감: {like_count}개")
+                if comment_count > 0:
+                    result_parts.append(f"댓글: {comment_count}개")
                 if mutual_count > 0:
                     result_parts.append(f"서로이웃: {mutual_count}개")
                 if neighbor_count > 0:

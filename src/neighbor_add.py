@@ -3,6 +3,7 @@
 검색 결과에서 블로그를 찾아 서로이웃 추가 수행
 """
 import time
+import os
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -624,7 +625,669 @@ class NeighborAdd:
             # 팝업이 떠도 다음 작업으로 진행
             return True
     
-    def process_blog_post(self, post_element, include_neighbor=False, mutual_only=True, like_enabled=False):
+    def load_comment_list(self, comment_file_path):
+        """
+        댓글 파일에서 댓글 목록 로드
+        
+        Args:
+            comment_file_path: 댓글 파일 경로 (None이면 기본 댓글 사용)
+        
+        Returns:
+            list: 댓글 목록 (한 줄에 하나씩)
+        """
+        DEFAULT_COMMENT = "잘 보고 갑니다!"
+        
+        if not comment_file_path or not os.path.exists(comment_file_path):
+            return [DEFAULT_COMMENT]
+        
+        try:
+            with open(comment_file_path, 'r', encoding='utf-8') as f:
+                comments = [line.strip() for line in f.readlines() if line.strip()]
+            
+            # 빈 파일이거나 유효한 댓글이 없는 경우 기본 댓글 반환
+            if not comments:
+                return [DEFAULT_COMMENT]
+            
+            return comments
+        except Exception as e:
+            print(f"댓글 파일 읽기 실패: {str(e)}")
+            return [DEFAULT_COMMENT]
+    
+    def find_comment_button(self):
+        """
+        댓글 버튼 찾기 (댓글 영역 열기)
+        <button type="button" class="comment_btn__TUucZ" data-click-area="pst.re">
+        
+        Returns:
+            댓글 버튼 요소 또는 None
+        """
+        try:
+            # 댓글 버튼 선택자들
+            comment_button_selectors = [
+                'button.comment_btn__TUucZ[data-click-area="pst.re"]',
+                'button[class*="comment_btn"][data-click-area="pst.re"]',
+                'button[class*="comment_btn"]',
+                'button[data-click-area*="pst"]',
+            ]
+            
+            for selector in comment_button_selectors:
+                try:
+                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for button in buttons:
+                        try:
+                            if button.is_displayed():
+                                # "댓글" 텍스트가 포함된 버튼인지 확인
+                                text = button.text or ""
+                                class_attr = button.get_attribute("class") or ""
+                                if "comment" in class_attr.lower() or "댓글" in text:
+                                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                                    time.sleep(0.5)
+                                    return button
+                        except:
+                            continue
+                except:
+                    continue
+            
+            # 텍스트로 찾기
+            try:
+                all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                for button in all_buttons:
+                    try:
+                        if not button.is_displayed():
+                            continue
+                        
+                        class_attr = button.get_attribute("class") or ""
+                        data_area = button.get_attribute("data-click-area") or ""
+                        
+                        if "comment_btn" in class_attr or ("comment" in class_attr.lower() and "pst" in data_area):
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                            time.sleep(0.5)
+                            return button
+                    except:
+                        continue
+            except:
+                pass
+            
+            return None
+        
+        except Exception as e:
+            print(f"댓글 버튼 찾기 실패: {str(e)}")
+            return None
+    
+    def find_comment_placeholder(self):
+        """
+        댓글 placeholder 영역 찾기 (클릭하여 입력 영역 활성화)
+        <div class="u_cbox_guide" data-action="write#placeholder" data-param="@event">댓글을 입력해주세요.</div>
+        
+        Returns:
+            placeholder 요소 또는 None
+        """
+        try:
+            # placeholder 선택자들
+            placeholder_selectors = [
+                'div.u_cbox_guide[data-action="write#placeholder"]',
+                'div[class*="u_cbox_guide"][data-action*="write#placeholder"]',
+                'div.u_cbox_guide',
+                'div[data-action*="write#placeholder"]',
+            ]
+            
+            for selector in placeholder_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for elem in elements:
+                        try:
+                            if elem.is_displayed():
+                                text = elem.text or ""
+                                if "댓글을 입력해주세요" in text or "댓글" in text:
+                                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elem)
+                                    time.sleep(0.5)
+                                    return elem
+                        except:
+                            continue
+                except:
+                    continue
+            
+            return None
+        
+        except Exception as e:
+            print(f"댓글 placeholder 찾기 실패: {str(e)}")
+            return None
+    
+    def find_comment_area(self):
+        """
+        댓글 입력 영역 찾기
+        <div title="댓글" id="naverComment__write_textarea" class="u_cbox_text u_cbox_text_mention" contenteditable="true" data-area-code="RPC.input"></div>
+        
+        Returns:
+            댓글 입력 영역 요소 또는 None
+        """
+        try:
+            # 댓글 입력 영역 선택자들
+            comment_area_selectors = [
+                'div#naverComment__write_textarea.u_cbox_text',
+                'div[id="naverComment__write_textarea"]',
+                'div[class*="u_cbox_text"][contenteditable="true"]',
+                'div[title="댓글"][contenteditable="true"]',
+                'div[data-area-code="RPC.input"][contenteditable="true"]',
+                'div[contenteditable="true"][class*="u_cbox_text"]',
+            ]
+            
+            for selector in comment_area_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for elem in elements:
+                        try:
+                            if elem.is_displayed():
+                                elem_id = elem.get_attribute("id") or ""
+                                elem_title = elem.get_attribute("title") or ""
+                                contenteditable = elem.get_attribute("contenteditable") or ""
+                                
+                                if (elem_id == "naverComment__write_textarea" or 
+                                    elem_title == "댓글" or 
+                                    (contenteditable == "true" and "u_cbox_text" in (elem.get_attribute("class") or ""))):
+                                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elem)
+                                    time.sleep(0.5)
+                                    return elem
+                        except:
+                            continue
+                except:
+                    continue
+            
+            # 마지막 시도: contenteditable div 중에서 찾기
+            try:
+                all_editable = self.driver.find_elements(By.CSS_SELECTOR, 'div[contenteditable="true"]')
+                for elem in all_editable:
+                    try:
+                        if not elem.is_displayed():
+                            continue
+                        
+                        elem_id = elem.get_attribute("id") or ""
+                        elem_class = elem.get_attribute("class") or ""
+                        
+                        if "naverComment" in elem_id or "u_cbox_text" in elem_class:
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elem)
+                            time.sleep(0.5)
+                            return elem
+                    except:
+                        continue
+            except:
+                pass
+            
+            return None
+        
+        except Exception as e:
+            print(f"댓글 입력 영역 찾기 실패: {str(e)}")
+            return None
+    
+    def check_already_commented(self):
+        """
+        이미 댓글을 작성했는지 확인
+        (댓글 영역이 이미 열려있거나, 댓글 입력 영역에 내용이 있는지 확인)
+        
+        Returns:
+            bool: 이미 댓글을 작성했으면 True, 아니면 False
+        """
+        print("[댓글 확인] 댓글 작성 여부 확인을 시작합니다...")
+        try:
+            # 먼저 댓글 영역이 이미 열려있는지 확인
+            comment_area = self.find_comment_area()
+            
+            # 댓글 영역이 없으면 댓글 버튼 클릭하여 열기
+            if not comment_area:
+                print("[댓글 확인] 댓글 영역이 열려있지 않습니다. 댓글 버튼을 클릭합니다...")
+                comment_button = self.find_comment_button()
+                if not comment_button:
+                    print("[댓글 확인] 댓글 버튼을 찾을 수 없습니다.")
+                    return False  # 댓글 버튼을 찾을 수 없으면 확인 불가
+                
+                try:
+                    comment_button.click()
+                    time.sleep(3)  # 댓글 영역이 열릴 때까지 충분히 대기
+                except:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", comment_button)
+                        time.sleep(3)
+                    except:
+                        return False  # 댓글 버튼 클릭 실패
+                
+                # 댓글 영역이 로드될 때까지 대기 및 스크롤
+                try:
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(1)
+                    # 댓글 영역으로 스크롤
+                    comment_area_element = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="u_cbox"], div[id*="comment"]')
+                    if comment_area_element:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", comment_area_element[0])
+                        time.sleep(1)
+                except:
+                    pass
+                
+                # 다시 댓글 영역 찾기
+                comment_area = self.find_comment_area()
+            
+            # 1. 댓글 입력 영역에 이미 내용이 있는지 확인 (이건 임시로 입력한 내용일 수 있으므로 주의)
+            # 이 부분은 주석 처리하고 다른 방법으로 확인
+            # if comment_area:
+            #     try:
+            #         # contenteditable div의 내용 확인
+            #         existing_text = self.driver.execute_script("return arguments[0].innerText;", comment_area)
+            #         if existing_text and existing_text.strip():
+            #             # 이미 내용이 있으면 작성된 것으로 간주
+            #             print(f"[댓글 확인] 이미 작성된 댓글이 있습니다: {existing_text[:50]}...")
+            #             return True
+            #     except:
+            #         pass
+            
+            # 2. 댓글 목록에서 내가 작성한 댓글 확인 (수정/삭제 버튼이 있는 댓글 찾기)
+            # 댓글 목록이 로드될 때까지 추가 대기 및 스크롤
+            time.sleep(3)  # 대기 시간 증가
+            
+            # 댓글 영역을 더 아래로 스크롤하여 모든 댓글이 로드되도록 함
+            try:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1)
+                # 댓글 영역 내에서 스크롤
+                comment_container = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="u_cbox"], div[id*="comment"], div[class*="comment"]')
+                if comment_container:
+                    for container in comment_container[:3]:  # 처음 3개만 확인
+                        try:
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", container)
+                            time.sleep(0.5)
+                        except:
+                            pass
+            except:
+                pass
+            
+            try:
+                # 방법 1: 페이지 소스에서 "수정" 또는 "삭제" 키워드 확인 (더 빠름)
+                try:
+                    page_source = self.driver.page_source
+                    # 댓글 영역 내에서 수정/삭제 버튼이 있는지 확인
+                    if "수정" in page_source or "삭제" in page_source:
+                        # 댓글 영역 내에서만 확인
+                        comment_section = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="u_cbox"], div[id*="comment"], div[class*="comment"]')
+                        for section in comment_section:
+                            try:
+                                section_html = section.get_attribute("outerHTML") or ""
+                                section_text = section.text or ""
+                                
+                                # 수정/삭제 버튼이 댓글 영역 내에 있는지 확인
+                                if ("수정" in section_text or "삭제" in section_text or 
+                                    "modify" in section_html.lower() or "delete" in section_html.lower()):
+                                    # 추가 확인: 수정/삭제 버튼이 실제로 있는지
+                                    buttons_in_section = section.find_elements(By.TAG_NAME, "button")
+                                    links_in_section = section.find_elements(By.TAG_NAME, "a")
+                                    for btn in buttons_in_section + links_in_section:
+                                        try:
+                                            btn_text = btn.text or ""
+                                            btn_class = btn.get_attribute("class") or ""
+                                            if ("수정" in btn_text or "삭제" in btn_text or 
+                                                "modify" in btn_class.lower() or "delete" in btn_class.lower()):
+                                                print(f"[댓글 확인] 내가 작성한 댓글을 찾았습니다. (버튼 텍스트: {btn_text})")
+                                                return True
+                                        except:
+                                            continue
+                            except:
+                                continue
+                except:
+                    pass
+                
+                # 방법 2: 모든 버튼과 링크에서 수정/삭제 버튼 찾기 (조건 완화)
+                try:
+                    all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                    all_links = self.driver.find_elements(By.TAG_NAME, "a")
+                    all_elements = all_buttons + all_links
+                    
+                    for elem in all_elements:
+                        try:
+                            if not elem.is_displayed():
+                                continue
+                            
+                            elem_class = elem.get_attribute("class") or ""
+                            elem_title = elem.get_attribute("title") or ""
+                            elem_text = elem.text or ""
+                            elem_aria_label = elem.get_attribute("aria-label") or ""
+                            
+                            # 수정 관련 키워드 확인 (조건 완화)
+                            if ("수정" in elem_text or "modify" in elem_class.lower() or "edit" in elem_class.lower() or 
+                                "수정" in elem_title or "수정" in elem_aria_label):
+                                # 댓글 영역 근처에 있는지 확인 (parent 찾기 시도)
+                                is_in_comment_area = False
+                                try:
+                                    parent = elem.find_element(By.XPATH, "./ancestor::div[contains(@class, 'u_cbox') or contains(@id, 'comment') or contains(@class, 'comment')]")
+                                    is_in_comment_area = True
+                                except:
+                                    # parent 찾기 실패 시, 댓글 영역 근처인지 다른 방법으로 확인
+                                    try:
+                                        # 현재 요소의 위치를 확인하여 댓글 영역 근처인지 판단
+                                        location = elem.location
+                                        size = elem.size
+                                        
+                                        # 댓글 영역 요소들과의 거리 확인
+                                        comment_areas = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="u_cbox"], div[id*="comment"], div[class*="comment"]')
+                                        for comment_area_elem in comment_areas[:5]:  # 처음 5개만 확인
+                                            try:
+                                                comment_location = comment_area_elem.location
+                                                comment_size = comment_area_elem.size
+                                                
+                                                # 요소가 댓글 영역과 겹치거나 근처에 있는지 확인
+                                                if (abs(location['y'] - comment_location['y']) < 1000 or  # 1000px 이내
+                                                    "u_cbox" in elem_class or "comment" in elem_class.lower()):
+                                                    is_in_comment_area = True
+                                                    break
+                                            except:
+                                                continue
+                                    except:
+                                        pass
+                                
+                                if is_in_comment_area or "u_cbox" in elem_class or "comment" in elem_class.lower():
+                                    print(f"[댓글 확인] 내가 작성한 댓글의 수정 버튼을 찾았습니다. (텍스트: {elem_text}, 클래스: {elem_class[:50]})")
+                                    return True
+                            
+                            # 삭제 관련 키워드 확인 (조건 완화)
+                            if ("삭제" in elem_text or "delete" in elem_class.lower() or "del" in elem_class.lower() or 
+                                "삭제" in elem_title or "삭제" in elem_aria_label):
+                                # 댓글 영역 근처에 있는지 확인
+                                is_in_comment_area = False
+                                try:
+                                    parent = elem.find_element(By.XPATH, "./ancestor::div[contains(@class, 'u_cbox') or contains(@id, 'comment') or contains(@class, 'comment')]")
+                                    is_in_comment_area = True
+                                except:
+                                    # parent 찾기 실패 시, 댓글 영역 근처인지 다른 방법으로 확인
+                                    try:
+                                        location = elem.location
+                                        comment_areas = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="u_cbox"], div[id*="comment"], div[class*="comment"]')
+                                        for comment_area_elem in comment_areas[:5]:
+                                            try:
+                                                comment_location = comment_area_elem.location
+                                                if abs(location['y'] - comment_location['y']) < 1000:
+                                                    is_in_comment_area = True
+                                                    break
+                                            except:
+                                                continue
+                                    except:
+                                        pass
+                                
+                                if is_in_comment_area or "u_cbox" in elem_class or "comment" in elem_class.lower():
+                                    print(f"[댓글 확인] 내가 작성한 댓글의 삭제 버튼을 찾았습니다. (텍스트: {elem_text}, 클래스: {elem_class[:50]})")
+                                    return True
+                        except:
+                            continue
+                except Exception as e:
+                    print(f"[댓글 확인] 버튼 찾기 중 오류: {str(e)}")
+                    pass
+                
+                # 댓글 목록에서 "내 댓글" 표시 확인
+                try:
+                    page_source = self.driver.page_source
+                    # 내 댓글 관련 텍스트나 클래스 확인
+                    if "내 댓글" in page_source or "my_comment" in page_source.lower():
+                        # 더 정확하게 확인하기 위해 댓글 영역 내에서 확인
+                        comment_list_selectors = [
+                            'div[class*="u_cbox_comment"]',
+                            'li[class*="u_cbox_comment"]',
+                            'div[class*="u_cbox_list"]',
+                        ]
+                        
+                        for selector in comment_list_selectors:
+                            try:
+                                comment_items = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                                for item in comment_items:
+                                    if not item.is_displayed():
+                                        continue
+                                    
+                                    item_html = item.get_attribute("outerHTML") or ""
+                                    item_text = item.text or ""
+                                    
+                                    # 내 댓글 표시나 수정/삭제 관련 텍스트가 있는지 확인
+                                    if ("내 댓글" in item_text or 
+                                        "수정" in item_text or 
+                                        "삭제" in item_text or
+                                        "my_comment" in item_html.lower() or
+                                        "modify" in item_html.lower() or
+                                        "delete" in item_html.lower()):
+                                        print("[댓글 확인] 내가 작성한 댓글이 댓글 목록에 있습니다.")
+                                        return True
+                            except:
+                                continue
+                except:
+                    pass
+            except:
+                pass
+            
+            # 3. 댓글 등록 버튼이 비활성화되어 있는지 확인
+            submit_button = self.find_comment_submit_button()
+            if submit_button:
+                try:
+                    # 버튼이 비활성화되어 있거나 disabled 속성이 있는지 확인
+                    is_disabled = submit_button.get_attribute("disabled")
+                    is_enabled = submit_button.is_enabled()
+                    
+                    if is_disabled or not is_enabled:
+                        print("[댓글 확인] 댓글 등록 버튼이 비활성화되어 있습니다. (이미 작성된 것으로 간주)")
+                        return True
+                    
+                    # 버튼의 클래스에서 disabled 관련 클래스 확인
+                    button_class = submit_button.get_attribute("class") or ""
+                    if "disabled" in button_class.lower() or "off" in button_class.lower():
+                        print("[댓글 확인] 댓글 등록 버튼이 비활성화 상태입니다.")
+                        return True
+                except:
+                    pass
+            
+            # 4. 댓글 입력 영역이 readonly이거나 비활성화되어 있는지 확인
+            if comment_area:
+                try:
+                    readonly = comment_area.get_attribute("readonly")
+                    contenteditable = comment_area.get_attribute("contenteditable")
+                    
+                    if readonly or contenteditable == "false":
+                        print("[댓글 확인] 댓글 입력 영역이 비활성화되어 있습니다.")
+                        return True
+                except:
+                    pass
+            
+            print("[댓글 확인] 이미 작성한 댓글을 찾지 못했습니다. 댓글 작성 가능 상태로 판단합니다.")
+            return False
+        
+        except Exception as e:
+            print(f"[댓글 확인] 댓글 작성 여부 확인 실패: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False  # 확인 실패 시 작성 가능한 것으로 간주
+    
+    def find_comment_submit_button(self):
+        """
+        댓글 등록 버튼 찾기
+        <button type="button" class="u_cbox_btn_upload __uis_naverComment_writeButton" data-action="write#request" data-area-code="RPC.write" data-ui-selector="writeButton">
+        
+        Returns:
+            댓글 등록 버튼 요소 또는 None
+        """
+        try:
+            # 댓글 등록 버튼 선택자들
+            submit_selectors = [
+                'button.u_cbox_btn_upload.__uis_naverComment_writeButton[data-action="write#request"]',
+                'button[class*="u_cbox_btn_upload"][data-action="write#request"]',
+                'button[data-area-code="RPC.write"][data-ui-selector="writeButton"]',
+                'button[data-action="write#request"]',
+                'button[class*="u_cbox_btn_upload"]',
+            ]
+            
+            for selector in submit_selectors:
+                try:
+                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for button in buttons:
+                        try:
+                            if button.is_displayed():
+                                text = button.text or ""
+                                data_action = button.get_attribute("data-action") or ""
+                                
+                                # "등록" 텍스트가 있거나 data-action이 "write#request"인 경우
+                                if "등록" in text or "write#request" in data_action:
+                                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                                    time.sleep(0.3)
+                                    return button
+                        except:
+                            continue
+                except:
+                    continue
+            
+            # 텍스트로 찾기
+            try:
+                all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                for button in all_buttons:
+                    try:
+                        if not button.is_displayed():
+                            continue
+                        
+                        text = button.text or ""
+                        class_attr = button.get_attribute("class") or ""
+                        data_action = button.get_attribute("data-action") or ""
+                        
+                        if ("등록" in text and "u_cbox" in class_attr) or "write#request" in data_action:
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                            time.sleep(0.3)
+                            return button
+                    except:
+                        continue
+            except:
+                pass
+            
+            return None
+        
+        except Exception as e:
+            print(f"댓글 등록 버튼 찾기 실패: {str(e)}")
+            return None
+    
+    def write_comment(self, comment_text, comment_list, current_index):
+        """
+        댓글 작성 (단계별 처리)
+        1. 이미 댓글을 작성했는지 확인
+        2. 댓글 버튼 클릭
+        3. placeholder 클릭
+        4. 댓글 입력 영역에 텍스트 입력
+        5. 등록 버튼 클릭
+        
+        Args:
+            comment_text: 작성할 댓글 텍스트
+            comment_list: 전체 댓글 목록
+            current_index: 현재 사용할 댓글 인덱스
+        
+        Returns:
+            bool or str: 댓글 작성 성공 여부 또는 "already_commented" (이미 작성함)
+        """
+        try:
+            # 페이지를 스크롤하여 댓글 영역이 보이도록 함
+            try:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1)
+            except:
+                pass
+            
+            # 0단계: 이미 댓글을 작성했는지 확인
+            if self.check_already_commented():
+                print("[댓글] 이미 작성한 댓글이 있습니다. 다음으로 넘어갑니다.")
+                return "already_commented"
+            
+            # 1단계: 댓글 버튼 찾기 및 클릭 (댓글 영역이 아직 열려있지 않은 경우)
+            # check_already_commented에서 이미 댓글 영역을 열었을 수 있으므로 먼저 확인
+            comment_area = self.find_comment_area()
+            if not comment_area:
+                # 댓글 영역이 없으면 댓글 버튼 클릭
+                comment_button = self.find_comment_button()
+                if not comment_button:
+                    print("댓글 버튼을 찾을 수 없습니다.")
+                    return False
+                
+                try:
+                    comment_button.click()
+                    time.sleep(2)  # 댓글 영역이 열릴 때까지 대기
+                except:
+                    # JavaScript로 클릭 시도
+                    try:
+                        self.driver.execute_script("arguments[0].click();", comment_button)
+                        time.sleep(2)
+                    except:
+                        print("댓글 버튼 클릭 실패")
+                        return False
+            else:
+                # 댓글 영역이 이미 열려있으면 대기만
+                time.sleep(1)
+            
+            # 2단계: placeholder 찾기 및 클릭 (입력 영역 활성화)
+            placeholder = self.find_comment_placeholder()
+            if placeholder:
+                try:
+                    placeholder.click()
+                    time.sleep(1)  # 입력 영역이 활성화될 때까지 대기
+                except:
+                    # JavaScript로 클릭 시도
+                    try:
+                        self.driver.execute_script("arguments[0].click();", placeholder)
+                        time.sleep(1)
+                    except:
+                        pass  # placeholder 클릭 실패해도 계속 진행
+            
+            # 3단계: 댓글 입력 영역 찾기
+            comment_area = self.find_comment_area()
+            if not comment_area:
+                print("댓글 입력 영역을 찾을 수 없습니다.")
+                return False
+            
+            # 댓글 입력 (contenteditable div)
+            try:
+                # 기존 내용 지우기
+                self.driver.execute_script("arguments[0].innerText = '';", comment_area)
+                time.sleep(0.3)
+                
+                # 클릭하여 포커스 주기
+                comment_area.click()
+                time.sleep(0.5)
+                
+                # 텍스트 입력 (JavaScript로 직접 입력 - 중복 입력 방지)
+                escaped_text = comment_text.replace("'", "\\'").replace("\n", "\\n").replace("\\", "\\\\")
+                self.driver.execute_script(f"arguments[0].innerText = '{escaped_text}';", comment_area)
+                time.sleep(1)
+            except Exception as e:
+                print(f"댓글 입력 실패: {str(e)}, send_keys로 재시도")
+                # JavaScript 실패 시 send_keys로 시도
+                try:
+                    comment_area.clear()
+                    time.sleep(0.3)
+                    comment_area.click()
+                    time.sleep(0.5)
+                    comment_area.send_keys(comment_text)
+                    time.sleep(1)
+                except Exception as e2:
+                    print(f"send_keys 입력도 실패: {str(e2)}")
+                    return False
+            
+            # 4단계: 등록 버튼 찾기 및 클릭
+            submit_button = self.find_comment_submit_button()
+            if not submit_button:
+                print("댓글 등록 버튼을 찾을 수 없습니다.")
+                return False
+            
+            try:
+                submit_button.click()
+                time.sleep(3)  # 댓글 등록 대기 (더 긴 대기 시간)
+            except:
+                # JavaScript로 클릭 시도
+                try:
+                    self.driver.execute_script("arguments[0].click();", submit_button)
+                    time.sleep(3)
+                except:
+                    print("등록 버튼 클릭 실패")
+                    return False
+            
+            return True
+        
+        except Exception as e:
+            print(f"댓글 작성 실패: {str(e)}")
+            return False
+    
+    def process_blog_post(self, post_element, include_neighbor=False, mutual_only=True, like_enabled=False, comment_enabled=False, comment_list=None, comment_index=0):
         """
         단일 블로그 포스트에 대한 서로이웃 추가 처리
         
@@ -633,9 +1296,12 @@ class NeighborAdd:
             include_neighbor: 이웃추가 포함 옵션
             mutual_only: 서로이웃만 옵션
             like_enabled: 공감 활성화 옵션
+            comment_enabled: 댓글 작성 활성화 옵션
+            comment_list: 댓글 목록 (None이면 기본 댓글 사용)
+            comment_index: 현재 사용할 댓글 인덱스
         
         Returns:
-            dict: 처리 결과 {'success': bool, 'type': 'mutual' or 'neighbor' or 'failed'}
+            dict: 처리 결과 {'success': bool, 'type': 'mutual' or 'neighbor' or 'failed' or 'comment'}
         """
         original_handles = self.driver.window_handles.copy()
         
@@ -679,21 +1345,78 @@ class NeighborAdd:
                     error_msg = f"[공감] 처리 중 오류 발생: {str(e)}"
                     print(error_msg)
             
-            # 공감만 체크되었고 이웃추가가 체크되지 않은 경우
-            if like_enabled and not include_neighbor:
+            # 3. 댓글 처리 (댓글 옵션이 활성화된 경우)
+            comment_success = False
+            comment_result = None
+            if comment_enabled:
+                try:
+                    # 페이지가 완전히 로드될 때까지 추가 대기
+                    time.sleep(2)
+                    
+                    # 페이지를 스크롤하여 댓글 영역이 로드되도록 함
+                    try:
+                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        time.sleep(1)
+                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                        time.sleep(1)
+                    except:
+                        pass
+                    
+                    # 댓글 목록 준비 (없으면 기본 댓글 사용)
+                    if comment_list is None or len(comment_list) == 0:
+                        comment_list = ["잘 보고 갑니다!"]
+                    
+                    # 댓글 인덱스 계산 (순환)
+                    actual_index = comment_index % len(comment_list)
+                    comment_text = comment_list[actual_index]
+                    
+                    # 댓글 작성 시도
+                    comment_result = self.write_comment(comment_text, comment_list, actual_index)
+                    
+                    if comment_result == "already_commented":
+                        # 이미 작성한 댓글이 있으면 성공으로 처리하고 다음으로 넘어감
+                        comment_success = True
+                        print("[댓글] 이미 작성한 댓글이 있어 스킵합니다.")
+                    elif comment_result:
+                        comment_success = True
+                        print(f"[댓글] 처리 성공: {comment_text}")
+                    else:
+                        comment_success = False
+                        print("[댓글] 댓글을 달 수 없습니다. (댓글 영역을 찾지 못함)")
+                    # 댓글을 달 수 없어도 실패로 처리하지 않고 다음 작업으로 진행
+                    time.sleep(2)  # 댓글 처리 대기
+                except Exception as e:
+                    error_msg = f"[댓글] 처리 중 오류 발생: {str(e)}"
+                    print(error_msg)
+                    # 오류가 발생해도 다음 작업으로 진행
+            
+            # 공감만 체크되었거나 댓글만 체크된 경우 (이웃추가가 체크되지 않은 경우)
+            if (like_enabled or comment_enabled) and not include_neighbor:
                 self.close_current_tab()
-                if like_success:
+                # 공감 성공 여부 확인
+                if like_enabled and like_success:
                     return {'success': True, 'type': 'like', 'reason': '공감 처리 완료'}
+                elif comment_enabled:
+                    # 댓글은 실패해도 다음으로 넘어가므로 성공으로 처리
+                    if comment_success:
+                        reason = '댓글 처리 완료'
+                        if comment_result == "already_commented":
+                            reason = '댓글 처리 완료 (이미 작성된 댓글 있어 스킵)'
+                        return {'success': True, 'type': 'comment', 'reason': reason}
+                    else:
+                        return {'success': True, 'type': 'comment', 'reason': '댓글 처리 완료 (댓글 영역을 찾지 못함)'}
                 else:
-                    return {'success': False, 'type': 'like', 'reason': '공감 버튼을 찾지 못함'}
+                    return {'success': False, 'type': 'failed', 'reason': '공감/댓글 버튼을 찾지 못함'}
             
             # 이웃추가 버튼 찾기 (서로이웃 버튼은 이웃추가 버튼 클릭 후 나타날 수 있음)
             neighbor_button = self.find_neighbor_add_button()
             if not neighbor_button:
                 self.close_current_tab()
-                # 공감만 성공했어도 공감 결과 반환
+                # 공감/댓글만 성공했어도 결과 반환
                 if like_enabled and like_success:
                     return {'success': True, 'type': 'like', 'reason': '공감 처리 완료 (이웃추가 버튼 없음)'}
+                elif comment_enabled:
+                    return {'success': True, 'type': 'comment', 'reason': '댓글 처리 완료 (이웃추가 버튼 없음)'}
                 return {'success': False, 'type': 'failed', 'reason': '이웃추가 버튼 없음'}
             
             # 서로이웃만 옵션인 경우 (이웃추가 포함이 체크 안됨)
@@ -871,7 +1594,7 @@ class NeighborAdd:
             self.close_current_tab()
             return {'success': False, 'type': 'failed', 'reason': f'오류: {str(e)}'}
     
-    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None, like_enabled=False, log_callback=None):
+    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None, like_enabled=False, comment_enabled=False, comment_file_path=None, log_callback=None):
         """
         서로이웃 추가 작업 시작
         
@@ -883,6 +1606,8 @@ class NeighborAdd:
             progress_callback: 진행 상황 업데이트 콜백 함수 (success_count, fail_count, current_total, max_total)
             work_control: 작업 제어 딕셔너리 {'stop': bool, 'pause': bool}
             like_enabled: 공감 활성화 옵션
+            comment_enabled: 댓글 작성 활성화 옵션
+            comment_file_path: 댓글 파일 경로 (None이면 기본 댓글 사용)
             log_callback: 로그 메시지 콜백 함수 (message)
         
         Returns:
@@ -906,7 +1631,18 @@ class NeighborAdd:
             mutual_count = 0
             neighbor_count = 0
             like_count = 0
+            comment_count = 0
             total_posts = len(posts)
+            
+            # 댓글 목록 로드 (댓글 기능이 활성화된 경우)
+            comment_list = None
+            if comment_enabled:
+                comment_list = self.load_comment_list(comment_file_path)
+                if log_callback:
+                    try:
+                        log_callback(f"댓글 목록 로드 완료: {len(comment_list)}개")
+                    except:
+                        pass
             
             for i, post in enumerate(posts, 1):
                 try:
@@ -920,7 +1656,8 @@ class NeighborAdd:
                             'fail_count': fail_count,
                             'mutual_count': mutual_count,
                             'neighbor_count': neighbor_count,
-                            'like_count': like_count
+                            'like_count': like_count,
+                            'comment_count': comment_count
                         }
                     
                     # 작업 일시정지 체크 (일시정지가 해제될 때까지 대기)
@@ -938,7 +1675,8 @@ class NeighborAdd:
                                 'fail_count': fail_count,
                                 'mutual_count': mutual_count,
                                 'neighbor_count': neighbor_count,
-                                'like_count': like_count
+                                'like_count': like_count,
+                                'comment_count': comment_count
                             }
                     
                     # 검색 결과 페이지로 돌아가기 (첫 번째 포스트가 아니고 새 탭이 열렸다면)
@@ -946,8 +1684,13 @@ class NeighborAdd:
                         self.driver.switch_to.window(self.driver.window_handles[0])
                         time.sleep(1)
                     
-                    # 포스트 처리
-                    result = self.process_blog_post(post, include_neighbor, mutual_only, like_enabled)
+                    # 포스트 처리 (댓글 인덱스는 순환하여 사용)
+                    if comment_list and len(comment_list) > 0:
+                        comment_index = (i - 1) % len(comment_list)
+                    else:
+                        comment_list = ["잘 보고 갑니다!"]
+                        comment_index = 0
+                    result = self.process_blog_post(post, include_neighbor, mutual_only, like_enabled, comment_enabled, comment_list, comment_index)
                     
                     if result['success']:
                         success_count += 1
@@ -966,10 +1709,37 @@ class NeighborAdd:
                                     log_callback(log_msg)
                                 except:
                                     pass
+                        elif result['type'] == 'comment':
+                            comment_count += 1
+                            # 이미 작성한 댓글이 있는지 확인
+                            reason = result.get('reason', '')
+                            if '이미 작성' in reason or '스킵' in reason:
+                                log_msg = f"[{i}/{total_posts}] 댓글 처리 성공 (이미 작성된 댓글 있어 스킵)"
+                            else:
+                                log_msg = f"[{i}/{total_posts}] 댓글 처리 성공"
+                            print(log_msg)
+                            if log_callback:
+                                try:
+                                    log_callback(log_msg)
+                                except:
+                                    pass
                     else:
                         fail_count += 1
                         if result.get('type') == 'like':
                             log_msg = f"[{i}/{total_posts}] 공감 처리 실패: {result.get('reason', '알 수 없는 오류')}"
+                            print(log_msg)
+                            if log_callback:
+                                try:
+                                    log_callback(log_msg)
+                                except:
+                                    pass
+                        elif result.get('type') == 'comment':
+                            # 댓글은 실패해도 다음으로 넘어가므로 로그만 출력
+                            reason = result.get('reason', '댓글을 달 수 없음')
+                            if '이미 작성' in reason or '스킵' in reason:
+                                log_msg = f"[{i}/{total_posts}] 댓글 처리: 이미 작성된 댓글이 있어 스킵"
+                            else:
+                                log_msg = f"[{i}/{total_posts}] 댓글 처리: {reason}"
                             print(log_msg)
                             if log_callback:
                                 try:
@@ -1002,7 +1772,8 @@ class NeighborAdd:
                                     'fail_count': fail_count,
                                     'mutual_count': mutual_count,
                                     'neighbor_count': neighbor_count,
-                                    'like_count': like_count
+                                    'like_count': like_count,
+                                    'comment_count': comment_count
                                 }
                             if work_control and work_control.get('pause', False):
                                 while work_control.get('pause', False) and not work_control.get('stop', False):
@@ -1040,7 +1811,8 @@ class NeighborAdd:
                 'fail_count': fail_count,
                 'mutual_count': mutual_count,
                 'neighbor_count': neighbor_count,
-                'like_count': like_count
+                'like_count': like_count,
+                'comment_count': comment_count
             }
         
         except Exception as e:
