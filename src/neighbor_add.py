@@ -271,6 +271,160 @@ class NeighborAdd:
             print(f"서로이웃 추가 버튼 찾기 실패: {str(e)}")
             return None
     
+    def find_neighbor_message_textarea(self):
+        """
+        서로이웃 메시지 입력 textarea 찾기
+        <textarea rows="4" cols="35" class="textarea_t1 ng-pristine ng-valid ng-not-empty ng-touched" ng-model="data.inviteMessage">우리 서로이웃해요~</textarea>
+        
+        Returns:
+            textarea 요소 또는 None
+        """
+        try:
+            # textarea 선택자들
+            textarea_selectors = [
+                'textarea[ng-model="data.inviteMessage"]',
+                'textarea[ng-model*="inviteMessage"]',
+                'textarea[class*="textarea_t1"]',
+                'textarea[class="textarea_t1"]',
+            ]
+            
+            for selector in textarea_selectors:
+                try:
+                    textarea = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if textarea.is_displayed():
+                        return textarea
+                except:
+                    continue
+            
+            # ng-model 속성으로 찾기
+            try:
+                all_textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
+                for textarea in all_textareas:
+                    try:
+                        if not textarea.is_displayed():
+                            continue
+                        
+                        ng_model = textarea.get_attribute("ng-model") or ""
+                        class_attr = textarea.get_attribute("class") or ""
+                        
+                        if "inviteMessage" in ng_model or "textarea_t1" in class_attr:
+                            return textarea
+                    except:
+                        continue
+            except:
+                pass
+            
+            return None
+        
+        except Exception as e:
+            print(f"서로이웃 메시지 textarea 찾기 실패: {str(e)}")
+            return None
+    
+    def write_neighbor_message(self, message_text):
+        """
+        서로이웃 메시지 입력
+        1. textarea 클릭
+        2. "우리 서로이웃해요~" 디폴트 글씨 삭제
+        3. 메시지 입력
+        
+        Args:
+            message_text: 입력할 메시지 텍스트
+        
+        Returns:
+            bool: 메시지 입력 성공 여부
+        """
+        try:
+            # textarea 찾기
+            textarea = self.find_neighbor_message_textarea()
+            if not textarea:
+                print("서로이웃 메시지 textarea를 찾을 수 없습니다.")
+                return False
+            
+            # textarea를 보이도록 스크롤
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
+                time.sleep(0.5)
+            except:
+                pass
+            
+            # textarea 클릭
+            try:
+                textarea.click()
+                time.sleep(0.5)
+            except:
+                try:
+                    self.driver.execute_script("arguments[0].click();", textarea)
+                    time.sleep(0.5)
+                except:
+                    pass
+            
+            # 기존 내용 삭제 ("우리 서로이웃해요~" 디폴트 글씨)
+            try:
+                # textarea의 값을 빈 문자열로 설정
+                self.driver.execute_script("arguments[0].value = '';", textarea)
+                time.sleep(0.3)
+                
+                # Angular 모델도 업데이트 (ng-model이 있는 경우)
+                ng_model = textarea.get_attribute("ng-model")
+                if ng_model:
+                    # AngularJS 모델 업데이트
+                    self.driver.execute_script(f"""
+                        var element = arguments[0];
+                        var scope = angular.element(element).scope();
+                        if (scope) {{
+                            scope.$apply(function() {{
+                                {ng_model} = '';
+                            }});
+                        }}
+                    """, textarea)
+                    time.sleep(0.3)
+            except:
+                # JavaScript로 직접 삭제 시도
+                try:
+                    textarea.clear()
+                    time.sleep(0.3)
+                except:
+                    pass
+            
+            # 메시지 입력
+            try:
+                # JavaScript로 직접 입력
+                escaped_text = message_text.replace("'", "\\'").replace("\n", "\\n").replace("\\", "\\\\")
+                self.driver.execute_script(f"arguments[0].value = '{escaped_text}';", textarea)
+                time.sleep(0.3)
+                
+                # Angular 모델도 업데이트
+                ng_model = textarea.get_attribute("ng-model")
+                if ng_model:
+                    # AngularJS 모델 업데이트
+                    self.driver.execute_script(f"""
+                        var element = arguments[0];
+                        var scope = angular.element(element).scope();
+                        if (scope) {{
+                            scope.$apply(function() {{
+                                {ng_model} = '{escaped_text}';
+                            }});
+                        }}
+                    """, textarea)
+                    time.sleep(0.3)
+            except Exception as e:
+                print(f"메시지 입력 실패 (JavaScript): {str(e)}, send_keys로 재시도")
+                # send_keys로 시도
+                try:
+                    textarea.clear()
+                    time.sleep(0.3)
+                    textarea.send_keys(message_text)
+                    time.sleep(0.5)
+                except Exception as e2:
+                    print(f"send_keys 입력도 실패: {str(e2)}")
+                    return False
+            
+            return True
+        
+        except Exception as e:
+            print(f"서로이웃 메시지 입력 실패: {str(e)}")
+            return False
+    
     def find_complete_button(self):
         """
         확인 버튼 찾기 (서로이웃 추가 후)
@@ -652,6 +806,32 @@ class NeighborAdd:
         except Exception as e:
             print(f"댓글 파일 읽기 실패: {str(e)}")
             return [DEFAULT_COMMENT]
+    
+    def load_neighbor_message_list(self, neighbor_file_path):
+        """
+        서로이웃 메시지 파일에서 메시지 목록 로드
+        
+        Args:
+            neighbor_file_path: 서로이웃 메시지 파일 경로 (None이면 기본 메시지 사용하지 않음)
+        
+        Returns:
+            list: 메시지 목록 (한 줄에 하나씩), 파일이 없으면 None
+        """
+        if not neighbor_file_path or not os.path.exists(neighbor_file_path):
+            return None
+        
+        try:
+            with open(neighbor_file_path, 'r', encoding='utf-8') as f:
+                messages = [line.strip() for line in f.readlines() if line.strip()]
+            
+            # 빈 파일이거나 유효한 메시지가 없는 경우 None 반환
+            if not messages:
+                return None
+            
+            return messages
+        except Exception as e:
+            print(f"서로이웃 메시지 파일 읽기 실패: {str(e)}")
+            return None
     
     def find_comment_button(self):
         """
@@ -1287,7 +1467,7 @@ class NeighborAdd:
             print(f"댓글 작성 실패: {str(e)}")
             return False
     
-    def process_blog_post(self, post_element, include_neighbor=False, mutual_only=True, like_enabled=False, comment_enabled=False, comment_list=None, comment_index=0):
+    def process_blog_post(self, post_element, include_neighbor=False, mutual_only=True, like_enabled=False, comment_enabled=False, comment_list=None, comment_index=0, neighbor_message_list=None, neighbor_message_index=0):
         """
         단일 블로그 포스트에 대한 서로이웃 추가 처리
         
@@ -1299,6 +1479,8 @@ class NeighborAdd:
             comment_enabled: 댓글 작성 활성화 옵션
             comment_list: 댓글 목록 (None이면 기본 댓글 사용)
             comment_index: 현재 사용할 댓글 인덱스
+            neighbor_message_list: 서로이웃 메시지 목록 (None이면 메시지 입력 안함)
+            neighbor_message_index: 현재 사용할 서로이웃 메시지 인덱스
         
         Returns:
             dict: 처리 결과 {'success': bool, 'type': 'mutual' or 'neighbor' or 'failed' or 'comment'}
@@ -1468,6 +1650,22 @@ class NeighborAdd:
                     # 확인 버튼을 찾기 위해 약간 더 대기
                     time.sleep(1)
                     
+                    # 서로이웃 메시지 입력 (파일이 있는 경우)
+                    if neighbor_message_list and len(neighbor_message_list) > 0:
+                        try:
+                            # 메시지 인덱스 계산 (순환)
+                            actual_message_index = neighbor_message_index % len(neighbor_message_list)
+                            message_text = neighbor_message_list[actual_message_index]
+                            
+                            # 메시지 입력
+                            if self.write_neighbor_message(message_text):
+                                print(f"[서로이웃 메시지] 입력 성공: {message_text}")
+                                time.sleep(1)
+                            else:
+                                print("[서로이웃 메시지] 입력 실패 (확인 버튼은 계속 진행)")
+                        except Exception as e:
+                            print(f"[서로이웃 메시지] 입력 중 오류: {str(e)} (확인 버튼은 계속 진행)")
+                    
                     # 완료 버튼 찾아서 클릭
                     complete_button = self.find_complete_button()
                     if complete_button:
@@ -1554,6 +1752,22 @@ class NeighborAdd:
                     # 확인 버튼을 찾기 위해 약간 더 대기
                     time.sleep(1)
                     
+                    # 서로이웃 메시지 입력 (파일이 있는 경우)
+                    if neighbor_message_list and len(neighbor_message_list) > 0:
+                        try:
+                            # 메시지 인덱스 계산 (순환)
+                            actual_message_index = neighbor_message_index % len(neighbor_message_list)
+                            message_text = neighbor_message_list[actual_message_index]
+                            
+                            # 메시지 입력
+                            if self.write_neighbor_message(message_text):
+                                print(f"[서로이웃 메시지] 입력 성공: {message_text}")
+                                time.sleep(1)
+                            else:
+                                print("[서로이웃 메시지] 입력 실패 (확인 버튼은 계속 진행)")
+                        except Exception as e:
+                            print(f"[서로이웃 메시지] 입력 중 오류: {str(e)} (확인 버튼은 계속 진행)")
+                    
                     # 완료 버튼 찾아서 클릭
                     complete_button = self.find_complete_button()
                     if complete_button:
@@ -1594,7 +1808,7 @@ class NeighborAdd:
             self.close_current_tab()
             return {'success': False, 'type': 'failed', 'reason': f'오류: {str(e)}'}
     
-    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None, like_enabled=False, comment_enabled=False, comment_file_path=None, log_callback=None):
+    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None, like_enabled=False, comment_enabled=False, comment_file_path=None, neighbor_file_path=None, log_callback=None):
         """
         서로이웃 추가 작업 시작
         
@@ -1608,6 +1822,7 @@ class NeighborAdd:
             like_enabled: 공감 활성화 옵션
             comment_enabled: 댓글 작성 활성화 옵션
             comment_file_path: 댓글 파일 경로 (None이면 기본 댓글 사용)
+            neighbor_file_path: 서로이웃 메시지 파일 경로 (None이면 메시지 입력 안함)
             log_callback: 로그 메시지 콜백 함수 (message)
         
         Returns:
@@ -1643,6 +1858,23 @@ class NeighborAdd:
                         log_callback(f"댓글 목록 로드 완료: {len(comment_list)}개")
                     except:
                         pass
+            
+            # 서로이웃 메시지 목록 로드 (파일이 있는 경우)
+            neighbor_message_list = None
+            if neighbor_file_path:
+                neighbor_message_list = self.load_neighbor_message_list(neighbor_file_path)
+                if neighbor_message_list:
+                    if log_callback:
+                        try:
+                            log_callback(f"서로이웃 메시지 목록 로드 완료: {len(neighbor_message_list)}개")
+                        except:
+                            pass
+                else:
+                    if log_callback:
+                        try:
+                            log_callback("서로이웃 메시지 파일이 비어있거나 읽을 수 없습니다.")
+                        except:
+                            pass
             
             for i, post in enumerate(posts, 1):
                 try:
@@ -1684,13 +1916,19 @@ class NeighborAdd:
                         self.driver.switch_to.window(self.driver.window_handles[0])
                         time.sleep(1)
                     
-                    # 포스트 처리 (댓글 인덱스는 순환하여 사용)
+                    # 포스트 처리 (댓글 인덱스와 서로이웃 메시지 인덱스는 순환하여 사용)
                     if comment_list and len(comment_list) > 0:
                         comment_index = (i - 1) % len(comment_list)
                     else:
                         comment_list = ["잘 보고 갑니다!"]
                         comment_index = 0
-                    result = self.process_blog_post(post, include_neighbor, mutual_only, like_enabled, comment_enabled, comment_list, comment_index)
+                    
+                    # 서로이웃 메시지 인덱스 계산 (순환)
+                    neighbor_message_index = 0
+                    if neighbor_message_list and len(neighbor_message_list) > 0:
+                        neighbor_message_index = (i - 1) % len(neighbor_message_list)
+                    
+                    result = self.process_blog_post(post, include_neighbor, mutual_only, like_enabled, comment_enabled, comment_list, comment_index, neighbor_message_list, neighbor_message_index)
                     
                     if result['success']:
                         success_count += 1
