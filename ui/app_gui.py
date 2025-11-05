@@ -374,9 +374,9 @@ class NaverAutoGUI:
             
             self.root.after(0, lambda: self._log_message(f"검색 완료: '{keyword}'"))
             
-            # 공감/댓글 옵션 로그 (기능 구현은 나중에)
+            # 공감/댓글 옵션 로그
             if like_enabled:
-                self.root.after(0, lambda: self._log_message("공감 기능이 체크되어 있습니다. (기능 구현 예정)"))
+                self.root.after(0, lambda: self._log_message("공감 기능이 활성화되어 있습니다."))
             if comment_enabled:
                 self.root.after(0, lambda: self._log_message("댓글 작성 기능이 체크되어 있습니다. (기능 구현 예정)"))
             
@@ -395,6 +395,11 @@ class NaverAutoGUI:
                 """작업 진행 상황 업데이트 콜백"""
                 self.root.after(0, lambda: self._update_progress(current_success, current_fail, max_total))
             
+            # 로그 메시지를 위한 콜백 함수 정의
+            def log_callback(message):
+                """로그 메시지 콜백"""
+                self.root.after(0, lambda: self._log_message(message))
+            
             # NeighborAdd 인스턴스 생성
             neighbor_add = NeighborAdd(self.naver_login.driver)
             
@@ -405,7 +410,9 @@ class NaverAutoGUI:
                 max_posts=neighbor_count,  # 사용자가 입력한 수량만큼 처리
                 delay=delay,
                 progress_callback=progress_callback,
-                work_control=self.work_control  # 작업 제어 플래그 전달
+                work_control=self.work_control,  # 작업 제어 플래그 전달
+                like_enabled=like_enabled,
+                log_callback=log_callback  # 로그 콜백 전달
             )
             
             # 최종 결과 업데이트
@@ -416,7 +423,22 @@ class NaverAutoGUI:
                     result['total']
                 ))
                 self.root.after(0, lambda: self._log_message(f"작업 완료: 총 {result['total']}개"))
-                self.root.after(0, lambda: self._log_message(f"성공: {result['success_count']}개 (서로이웃: {result.get('mutual_count', 0)}개, 일반이웃: {result.get('neighbor_count', 0)}개)"))
+                like_count = result.get('like_count', 0)
+                mutual_count = result.get('mutual_count', 0)
+                neighbor_count = result.get('neighbor_count', 0)
+                
+                result_parts = []
+                if like_count > 0:
+                    result_parts.append(f"공감: {like_count}개")
+                if mutual_count > 0:
+                    result_parts.append(f"서로이웃: {mutual_count}개")
+                if neighbor_count > 0:
+                    result_parts.append(f"일반이웃: {neighbor_count}개")
+                
+                if result_parts:
+                    self.root.after(0, lambda: self._log_message(f"성공: {result['success_count']}개 ({', '.join(result_parts)})"))
+                else:
+                    self.root.after(0, lambda: self._log_message(f"성공: {result['success_count']}개"))
                 self.root.after(0, lambda: self._log_message(f"실패: {result['fail_count']}개"))
             else:
                 # 작업 중지 등으로 인한 실패인 경우에도 진행상황 업데이트

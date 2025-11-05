@@ -427,7 +427,204 @@ class NeighborAdd:
         except:
             pass
     
-    def process_blog_post(self, post_element, include_neighbor=False, mutual_only=True):
+    def find_like_button(self):
+        """
+        공감 버튼 찾기
+        <a class="u_likeit_button _face off"> 또는 <a class="u_likeit_list_button _button off" data-type="like">
+        
+        Returns:
+            버튼 요소 또는 None
+        """
+        try:
+            # 페이지를 스크롤하여 공감 버튼이 보이도록 함
+            try:
+                self.driver.execute_script("window.scrollTo(0, 0);")  # 페이지 상단으로
+                time.sleep(0.5)
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/3);")  # 페이지 중간으로
+                time.sleep(0.5)
+            except:
+                pass
+            
+            # 먼저 제공된 HTML 구조에 맞는 선택자로 찾기
+            # 클래스가 공백으로 구분되어 있으므로 [class*="..."] 형식 사용
+            like_selectors = [
+                'a[class*="u_likeit_button"][class*="_face"]',  # 메인 공감 버튼
+                'a[class*="u_likeit_button"]',  # 일반 공감 버튼
+                'div[class*="u_likeit_list_module"] a[class*="u_likeit_button"]',  # 모듈 내부 버튼
+                'a[class*="u_likeit_list_button"][data-type="like"]',  # 공감 리스트 버튼
+                'li[class*="u_likeit_list"][class*="like"] a',  # 공감 리스트 내부 링크
+                'a[role="button"][aria-haspopup="true"][class*="u_likeit"]',  # aria 속성으로 찾기
+                'a[onclick*="like"][class*="u_likeit"]',  # onclick 속성으로 찾기
+            ]
+            
+            for selector in like_selectors:
+                try:
+                    # find_elements로 여러 개 찾기
+                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for button in buttons:
+                        try:
+                            if button.is_displayed():
+                                # 버튼이 보이는 영역으로 스크롤
+                                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                                time.sleep(0.3)
+                                return button
+                        except:
+                            continue
+                except:
+                    continue
+            
+            # XPath로 찾기
+            try:
+                xpath_selectors = [
+                    "//a[contains(@class, 'u_likeit_button') and contains(@class, '_face')]",
+                    "//a[contains(@class, 'u_likeit_button')]",
+                    "//div[contains(@class, 'u_likeit_list_module')]//a[contains(@class, 'u_likeit_button')]",
+                    "//a[@data-type='like' and contains(@class, 'u_likeit')]",
+                ]
+                
+                for xpath in xpath_selectors:
+                    try:
+                        buttons = self.driver.find_elements(By.XPATH, xpath)
+                        for button in buttons:
+                            try:
+                                if button.is_displayed():
+                                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                                    time.sleep(0.3)
+                                    return button
+                            except:
+                                continue
+                    except:
+                        continue
+            except:
+                pass
+            
+            # 텍스트로 찾기
+            try:
+                all_links = self.driver.find_elements(By.TAG_NAME, "a")
+                for link in all_links:
+                    try:
+                        if not link.is_displayed():
+                            continue
+                        
+                        class_attr = link.get_attribute("class") or ""
+                        data_type = link.get_attribute("data-type") or ""
+                        role = link.get_attribute("role") or ""
+                        
+                        # 공감 버튼 관련 클래스나 속성 확인
+                        if ("u_likeit" in class_attr and "like" in data_type) or \
+                           ("u_likeit_button" in class_attr) or \
+                           ("u_likeit_list_button" in class_attr and data_type == "like") or \
+                           (role == "button" and "u_likeit" in class_attr):
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
+                            time.sleep(0.3)
+                            return link
+                    except:
+                        continue
+            except:
+                pass
+            
+            return None
+        
+        except Exception as e:
+            print(f"공감 버튼 찾기 실패: {str(e)}")
+            return None
+    
+    def click_like_button(self):
+        """
+        공감 버튼 클릭
+        공감이 안되어 있으면 클릭하고, 이미 공감되어 있으면 넘어감
+        팝업이 떠도 다음 작업으로 진행
+        
+        Returns:
+            bool: 공감 시도 성공 여부 (팝업이 떠도 True 반환)
+        """
+        try:
+            like_button = self.find_like_button()
+            if not like_button:
+                print("공감 버튼을 찾을 수 없습니다.")
+                # 페이지 소스를 확인하여 공감 관련 요소가 있는지 확인
+                try:
+                    page_source = self.driver.page_source
+                    if "u_likeit" in page_source:
+                        print("페이지에 공감 관련 요소는 있지만 버튼을 찾지 못했습니다.")
+                    else:
+                        print("페이지에 공감 관련 요소가 없습니다.")
+                except:
+                    pass
+                return False
+            
+            # 공감 상태 확인 (class에 "off"가 있으면 공감 안됨, "on"이 있으면 공감됨)
+            class_attr = like_button.get_attribute("class") or ""
+            
+            # 이미 공감되어 있으면 넘어가기
+            if "on" in class_attr and "off" not in class_attr:
+                print("이미 공감되어 있음")
+                return True
+            
+            # 공감 버튼 클릭
+            try:
+                # 공감 레이어가 열려야 할 수도 있으므로 먼저 버튼 클릭
+                like_button.click()
+                time.sleep(1.5)  # 공감 레이어가 열릴 시간 대기
+                
+                # 공감 리스트 버튼 찾기 (공감 메뉴에서)
+                like_list_selectors = [
+                    'li[class*="u_likeit_list"][class*="like"] a',  # 가장 구체적인 선택자
+                    'a[class*="u_likeit_list_button"][data-type="like"]',  # data-type으로 찾기
+                    'a[class*="u_likeit_list_button"][class*="_button"][data-type="like"]',
+                    'a[role="button"][data-type="like"][class*="u_likeit"]',  # role과 data-type으로 찾기
+                ]
+                
+                list_button_clicked = False
+                for selector in like_list_selectors:
+                    try:
+                        list_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        if list_button.is_displayed():
+                            list_button.click()
+                            time.sleep(1)
+                            list_button_clicked = True
+                            break
+                    except:
+                        continue
+                
+                # 공감 리스트 버튼을 찾지 못했어도 성공으로 처리 (팝업 가능성)
+                return True
+                
+            except Exception as e:
+                # 클릭 실패 시 JavaScript로 시도
+                try:
+                    self.driver.execute_script("arguments[0].click();", like_button)
+                    time.sleep(1.5)  # 공감 레이어가 열릴 시간 대기
+                    
+                    # 공감 리스트 버튼도 JavaScript로 클릭 시도
+                    like_list_selectors = [
+                        'li[class*="u_likeit_list"][class*="like"] a',
+                        'a[class*="u_likeit_list_button"][data-type="like"]',
+                        'a[class*="u_likeit_list_button"][class*="_button"][data-type="like"]',
+                        'a[role="button"][data-type="like"][class*="u_likeit"]',
+                    ]
+                    
+                    for selector in like_list_selectors:
+                        try:
+                            list_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                            if list_button.is_displayed():
+                                self.driver.execute_script("arguments[0].click();", list_button)
+                                time.sleep(1)
+                                break
+                        except:
+                            continue
+                    
+                    return True
+                except:
+                    # 팝업이 떠도 성공으로 처리
+                    return True
+        
+        except Exception as e:
+            print(f"공감 버튼 클릭 실패: {str(e)} (팝업 가능성)")
+            # 팝업이 떠도 다음 작업으로 진행
+            return True
+    
+    def process_blog_post(self, post_element, include_neighbor=False, mutual_only=True, like_enabled=False):
         """
         단일 블로그 포스트에 대한 서로이웃 추가 처리
         
@@ -435,6 +632,7 @@ class NeighborAdd:
             post_element: 블로그 포스트 요소
             include_neighbor: 이웃추가 포함 옵션
             mutual_only: 서로이웃만 옵션
+            like_enabled: 공감 활성화 옵션
         
         Returns:
             dict: 처리 결과 {'success': bool, 'type': 'mutual' or 'neighbor' or 'failed'}
@@ -448,10 +646,54 @@ class NeighborAdd:
             
             time.sleep(3)  # 페이지 로딩 대기
             
+            # 2. 공감 처리 (공감 옵션이 활성화된 경우)
+            like_success = False
+            if like_enabled:
+                try:
+                    # 페이지가 완전히 로드될 때까지 추가 대기
+                    time.sleep(3)
+                    
+                    # 페이지를 스크롤하여 공감 버튼이 로드되도록 함
+                    try:
+                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        time.sleep(1)
+                        self.driver.execute_script("window.scrollTo(0, 0);")
+                        time.sleep(1)
+                    except:
+                        pass
+                    
+                    # 공감 버튼을 여러 번 시도해서 찾기
+                    for attempt in range(5):  # 3번에서 5번으로 증가
+                        result = self.click_like_button()
+                        if result:
+                            like_success = True
+                            print(f"[공감] 처리 성공 (시도 {attempt + 1})")
+                            break
+                        time.sleep(1.5)  # 재시도 전 대기 시간 증가
+                    
+                    if not like_success:
+                        print("[공감] 버튼을 찾지 못하거나 클릭하지 못했습니다.")
+                    
+                    time.sleep(2)  # 공감 처리 대기
+                except Exception as e:
+                    error_msg = f"[공감] 처리 중 오류 발생: {str(e)}"
+                    print(error_msg)
+            
+            # 공감만 체크되었고 이웃추가가 체크되지 않은 경우
+            if like_enabled and not include_neighbor:
+                self.close_current_tab()
+                if like_success:
+                    return {'success': True, 'type': 'like', 'reason': '공감 처리 완료'}
+                else:
+                    return {'success': False, 'type': 'like', 'reason': '공감 버튼을 찾지 못함'}
+            
             # 이웃추가 버튼 찾기 (서로이웃 버튼은 이웃추가 버튼 클릭 후 나타날 수 있음)
             neighbor_button = self.find_neighbor_add_button()
             if not neighbor_button:
                 self.close_current_tab()
+                # 공감만 성공했어도 공감 결과 반환
+                if like_enabled and like_success:
+                    return {'success': True, 'type': 'like', 'reason': '공감 처리 완료 (이웃추가 버튼 없음)'}
                 return {'success': False, 'type': 'failed', 'reason': '이웃추가 버튼 없음'}
             
             # 서로이웃만 옵션인 경우 (이웃추가 포함이 체크 안됨)
@@ -499,7 +741,7 @@ class NeighborAdd:
                                     time.sleep(1)
                         except:
                             pass
-                    
+                
                     # 확인 버튼을 찾기 위해 약간 더 대기
                     time.sleep(1)
                     
@@ -521,8 +763,8 @@ class NeighborAdd:
                                 time.sleep(2)
                             except Exception as e:
                                 print(f"확인 버튼 클릭 실패: {str(e)}")
-                                self.close_current_tab()
-                                return {'success': False, 'type': 'failed', 'reason': '확인 버튼 클릭 실패'}
+                            self.close_current_tab()
+                            return {'success': False, 'type': 'failed', 'reason': '확인 버튼 클릭 실패'}
                     else:
                         self.close_current_tab()
                         return {'success': False, 'type': 'failed', 'reason': '확인 버튼을 찾을 수 없음'}
@@ -629,7 +871,7 @@ class NeighborAdd:
             self.close_current_tab()
             return {'success': False, 'type': 'failed', 'reason': f'오류: {str(e)}'}
     
-    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None):
+    def start_neighbor_add_work(self, include_neighbor=False, mutual_only=True, max_posts=10, delay=30, progress_callback=None, work_control=None, like_enabled=False, log_callback=None):
         """
         서로이웃 추가 작업 시작
         
@@ -640,6 +882,8 @@ class NeighborAdd:
             delay: 각 작업 사이 딜레이 (초)
             progress_callback: 진행 상황 업데이트 콜백 함수 (success_count, fail_count, current_total, max_total)
             work_control: 작업 제어 딕셔너리 {'stop': bool, 'pause': bool}
+            like_enabled: 공감 활성화 옵션
+            log_callback: 로그 메시지 콜백 함수 (message)
         
         Returns:
             dict: 작업 결과
@@ -661,6 +905,7 @@ class NeighborAdd:
             fail_count = 0
             mutual_count = 0
             neighbor_count = 0
+            like_count = 0
             total_posts = len(posts)
             
             for i, post in enumerate(posts, 1):
@@ -674,7 +919,8 @@ class NeighborAdd:
                             'success_count': success_count,
                             'fail_count': fail_count,
                             'mutual_count': mutual_count,
-                            'neighbor_count': neighbor_count
+                            'neighbor_count': neighbor_count,
+                            'like_count': like_count
                         }
                     
                     # 작업 일시정지 체크 (일시정지가 해제될 때까지 대기)
@@ -691,7 +937,8 @@ class NeighborAdd:
                                 'success_count': success_count,
                                 'fail_count': fail_count,
                                 'mutual_count': mutual_count,
-                                'neighbor_count': neighbor_count
+                                'neighbor_count': neighbor_count,
+                                'like_count': like_count
                             }
                     
                     # 검색 결과 페이지로 돌아가기 (첫 번째 포스트가 아니고 새 탭이 열렸다면)
@@ -700,16 +947,37 @@ class NeighborAdd:
                         time.sleep(1)
                     
                     # 포스트 처리
-                    result = self.process_blog_post(post, include_neighbor, mutual_only)
+                    result = self.process_blog_post(post, include_neighbor, mutual_only, like_enabled)
                     
                     if result['success']:
                         success_count += 1
                         if result['type'] == 'mutual':
                             mutual_count += 1
+                            print(f"[{i}/{total_posts}] 서로이웃 추가 성공")
                         elif result['type'] == 'neighbor':
                             neighbor_count += 1
+                            print(f"[{i}/{total_posts}] 일반 이웃추가 성공")
+                        elif result['type'] == 'like':
+                            like_count += 1
+                            log_msg = f"[{i}/{total_posts}] 공감 처리 성공"
+                            print(log_msg)
+                            if log_callback:
+                                try:
+                                    log_callback(log_msg)
+                                except:
+                                    pass
                     else:
                         fail_count += 1
+                        if result.get('type') == 'like':
+                            log_msg = f"[{i}/{total_posts}] 공감 처리 실패: {result.get('reason', '알 수 없는 오류')}"
+                            print(log_msg)
+                            if log_callback:
+                                try:
+                                    log_callback(log_msg)
+                                except:
+                                    pass
+                        else:
+                            print(f"[{i}/{total_posts}] 작업 실패: {result.get('reason', '알 수 없는 오류')}")
                     
                     # 진행 상황 업데이트 콜백 호출
                     if progress_callback:
@@ -733,7 +1001,8 @@ class NeighborAdd:
                                     'success_count': success_count,
                                     'fail_count': fail_count,
                                     'mutual_count': mutual_count,
-                                    'neighbor_count': neighbor_count
+                                    'neighbor_count': neighbor_count,
+                                    'like_count': like_count
                                 }
                             if work_control and work_control.get('pause', False):
                                 while work_control.get('pause', False) and not work_control.get('stop', False):
@@ -770,7 +1039,8 @@ class NeighborAdd:
                 'success_count': success_count,
                 'fail_count': fail_count,
                 'mutual_count': mutual_count,
-                'neighbor_count': neighbor_count
+                'neighbor_count': neighbor_count,
+                'like_count': like_count
             }
         
         except Exception as e:
