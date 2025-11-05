@@ -1,0 +1,12 @@
+{
+  "firebase": {
+    "apiKey": "AIzaSyBnttw13ZLjQy4KWEDY3KVi3GTBUqeXOyo",
+    "authDomain": "blog-cdc9b.firebaseapp.com",
+    "projectId": "blog-cdc9b",
+    "storageBucket": "blog-cdc9b.firebasestorage.app",
+    "messagingSenderId": "1025951916921",
+    "appId": "1:1025951916921:web:7ecf732013c947810045a8",
+    "measurementId": "G-R1VMNHG7WL",
+    "databaseURL": "https://blog-cdc9b-default-rtdb.firebaseio.com"
+  }
+}
