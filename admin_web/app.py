@@ -17,10 +17,20 @@ from src.auth_manager import AuthManager
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'  # 프로덕션에서는 환경 변수로 관리
 
-# Firebase 인스턴스
-auth_manager = AuthManager()
-db = get_db()
-auth = get_auth()
+# Firebase 인스턴스 (에러 발생 시에도 앱 로드 가능하도록 try-except 사용)
+try:
+    auth_manager = AuthManager()
+    db = get_db()
+    auth = get_auth()
+except Exception as e:
+    # Firebase 초기화 실패해도 앱은 로드됨 (실제 사용 시점에 에러 발생)
+    print(f"⚠ Firebase 초기화 실패 (앱은 계속 로드됨): {str(e)}")
+    import traceback
+    traceback.print_exc()
+    # 더미 객체로 설정 (실제 사용 시 에러 발생)
+    auth_manager = None
+    db = None
+    auth = None
 
 
 def check_admin():
