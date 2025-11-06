@@ -77,16 +77,15 @@
                         {% endif %}
                     </td>
                     <td>
-                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 140px;">
                             {% if not user.approved %}
-                                <button class="btn btn-sm btn-success" onclick="window.approveUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #28a745;">
+                                <button class="btn btn-sm btn-success" onclick="window.approveUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #28a745; color: white; background-color: #28a745;">
                                     승인
                                 </button>
-                                <button class="btn btn-sm btn-danger" onclick="window.rejectUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #dc3545;">
-                                    거부
-                                </button>
                             {% else %}
-                                <span class="text-muted" style="margin-right: 8px;">-</span>
+                                <span style="min-width: 60px; padding: 6px 12px; display: inline-block; visibility: hidden;">
+                                    승인
+                                </span>
                             {% endif %}
                             <button class="btn btn-sm btn-danger" onclick="window.deleteUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="background-color: #dc3545; min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #c82333; color: white;">
                                 삭제

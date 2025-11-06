@@ -956,14 +956,26 @@ def update_expiry_date(user_id):
             try:
                 if db is not None:
                     print(f"🔍 Realtime Database 만료일 저장 시도: user_id={user_id}, expiry_date={expiry_date}")
-                    # Realtime Database에 저장
-                    db.child("users").child(user_id).update({"expiry_date": expiry_date})
-                    print(f"✓ Realtime Database에 만료일 저장 성공")
+                    # 기존 데이터를 먼저 가져와서 병합
+                    existing_user = db.child("users").child(user_id).get()
+                    if existing_user and existing_user.val():
+                        # 기존 데이터와 병합
+                        user_data = existing_user.val()
+                        user_data["expiry_date"] = expiry_date
+                        # 기존 데이터를 유지하면서 expiry_date만 업데이트
+                        db.child("users").child(user_id).set(user_data)
+                        print(f"✓ Realtime Database에 만료일 저장 성공 (기존 데이터 유지)")
+                    else:
+                        # 기존 데이터가 없으면 expiry_date만 저장
+                        db.child("users").child(user_id).update({"expiry_date": expiry_date})
+                        print(f"✓ Realtime Database에 만료일 저장 성공 (새 데이터)")
                     rtdb_success = True
                 else:
                     print("⚠ Realtime Database 인스턴스가 없습니다.")
             except Exception as rtdb_error:
                 print(f"⚠ Realtime Database 저장 실패: {str(rtdb_error)}")
+                import traceback
+                traceback.print_exc()
             
             # 둘 중 하나라도 성공하면 성공으로 처리
             if firestore_success or rtdb_success:
