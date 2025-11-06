@@ -1,0 +1,19 @@
+Vercel 배포 명령어
+
+다음 명령어를 순서대로 실행하세요:
+
+1. cd C:\blog-master
+
+2. npm install -g vercel
+   (또는 이미 설치되어 있으면 생략)
+
+3. vercel login
+
+4. vercel
+   (또는 프로덕션 배포: vercel --prod)
+
+배포 후:
+- Vercel 대시보드에서 URL 확인
+- 환경 변수 설정 (Settings > Environment Variables)
+
+자세한 내용은 VERCEL_DEPLOY.md 참고

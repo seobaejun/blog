@@ -1,0 +1,17 @@
+# Vercel 배포용 의존성 (Flask 앱)
+Flask==3.0.0
+pyrebase4==4.7.1
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# 로컬 개발용 (Vercel 배포 시 제외됨)
+# firebase-admin>=6.4.0
+# selenium>=4.15.0
+# webdriver-manager>=4.0.0
+# playwright>=1.40.0
+# beautifulsoup4>=4.12.0
+# lxml>=4.9.0
+# setuptools>=65.5.0
+# pyautogui>=0.9.54
+# pyperclip>=1.8.2
+

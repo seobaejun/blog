@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}결제 관리{% endblock %}
+
+{% block content %}
+<div class="payments-page">
+    <h1 class="page-title">결제 관리</h1>
+    
+    <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('pending')">결제 대기</button>
+        <button class="tab-btn" onclick="showTab('history')">결제 내역</button>
+    </div>
+    
+    <!-- 결제 대기 목록 -->
+    <div id="pending-tab" class="tab-content active">
+        <h2>결제 대기 목록</h2>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>이름</th>
+                        <th>이메일</th>
+                        <th>전화번호</th>
+                        <th>만료일</th>
+                        <th>상태</th>
+                        <th>작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in pending_payments %}
+                    <tr>
+                        <td>{{ payment.name or '-' }}</td>
+                        <td>{{ payment.email or '-' }}</td>
+                        <td>{{ payment.phone or '-' }}</td>
+                        <td>
+                            {% if payment.expiry_date %}
+                                {{ payment.expiry_date[:10] }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-danger">결제 대기</span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-success" onclick="confirmPayment('{{ payment.user_id }}', '{{ payment.name or payment.email }}')">
+                                결제 확인
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center">결제 대기 중인 회원이 없습니다.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- 결제 내역 -->
+    <div id="history-tab" class="tab-content">
+        <h2>결제 내역</h2>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>이름</th>
+                        <th>이메일</th>
+                        <th>결제일</th>
+                        <th>만료일</th>
+                        <th>상태</th>
+                        <th>확인일</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in payments %}
+                    <tr>
+                        <td>{{ payment.name or '-' }}</td>
+                        <td>{{ payment.email or '-' }}</td>
+                        <td>{{ payment.payment_date[:10] if payment.payment_date else '-' }}</td>
+                        <td>{{ payment.expiry_date[:10] if payment.expiry_date else '-' }}</td>
+                        <td>
+                            {% if payment.status == 'confirmed' %}
+                                <span class="badge badge-success">확인됨</span>
+                            {% elif payment.status == 'pending' %}
+                                <span class="badge badge-warning">대기 중</span>
+                            {% else %}
+                                <span class="badge badge-danger">거부됨</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ payment.confirmed_at[:10] if payment.confirmed_at else '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center">결제 내역이 없습니다.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+function showTab(tabName) {
+    // 모든 탭 숨기기
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // 모든 탭 버튼 비활성화
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // 선택한 탭 보이기
+    document.getElementById(tabName + '-tab').classList.add('active');
+    event.target.classList.add('active');
+}
+
+function confirmPayment(userId, userName) {
+    if (!confirm(`"${userName}" 회원의 결제를 확인하시겠습니까?\n이용 기간이 30일 연장됩니다.`)) {
+        return;
+    }
+    
+    fetch(`/payments/confirm/${userId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message + '\n새 만료일: ' + data.expiry_date.substring(0, 10));
+            location.reload();
+        } else {
+            alert('오류: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('결제 확인 처리 중 오류가 발생했습니다.');
+    });
+}
+</script>
+{% endblock %}
+

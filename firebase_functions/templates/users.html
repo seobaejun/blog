@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}회원 관리{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <h1 class="page-title">회원 관리</h1>
+    
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>이름</th>
+                    <th>아이디</th>
+                    <th>이메일</th>
+                    <th>전화번호</th>
+                    <th>승인 상태</th>
+                    <th>가입일</th>
+                    <th>이용 만료일</th>
+                    <th>작업</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr {% if not user.approved %}class="pending"{% endif %}>
+                    <td>{{ user.name or '-' }}</td>
+                    <td>{{ user.username or '-' }}</td>
+                    <td>{{ user.email or '-' }}</td>
+                    <td>{{ user.phone or '-' }}</td>
+                    <td>
+                        {% if user.approved %}
+                            <span class="badge badge-success">승인됨</span>
+                        {% else %}
+                            <span class="badge badge-warning">대기 중</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user.created_at[:10] if user.created_at else '-' }}</td>
+                    <td>
+                        {% if user.expiry_date %}
+                            {% set expiry_str = user.expiry_date[:10] %}
+                            {{ expiry_str }}
+                            {% set today_str = today[:10] if today else '' %}
+                            {% if today_str and expiry_str < today_str %}
+                                <span class="badge badge-danger">만료</span>
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not user.approved %}
+                            <button class="btn btn-sm btn-success" onclick="approveUser('{{ user.user_id }}', '{{ user.name or user.email }}')">
+                                승인
+                            </button>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center">등록된 회원이 없습니다.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function approveUser(userId, userName) {
+    if (!confirm(`정말로 "${userName}" 회원을 승인하시겠습니까?`)) {
+        return;
+    }
+    
+    fetch(`/users/approve/${userId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('오류: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('승인 처리 중 오류가 발생했습니다.');
+    });
+}
+</script>
+{% endblock %}

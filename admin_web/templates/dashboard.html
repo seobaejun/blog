@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}대시보드{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h1 class="page-title">대시보드</h1>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-content">
+                <h3>전체 회원</h3>
+                <p class="stat-number">{{ stats.total_users or 0 }}</p>
+            </div>
+        </div>
+        
+        <div class="stat-card warning">
+            <div class="stat-icon">⏳</div>
+            <div class="stat-content">
+                <h3>승인 대기</h3>
+                <p class="stat-number">{{ stats.pending_approvals or 0 }}</p>
+            </div>
+        </div>
+        
+        <div class="stat-card danger">
+            <div class="stat-icon">💰</div>
+            <div class="stat-content">
+                <h3>결제 대기</h3>
+                <p class="stat-number">{{ stats.pending_payments or 0 }}</p>
+            </div>
+        </div>
+        
+        <div class="stat-card info">
+            <div class="stat-icon">⏰</div>
+            <div class="stat-content">
+                <h3>만료 예정 (7일 이내)</h3>
+                <p class="stat-number">{{ stats.expiring_soon or 0 }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="quick-actions">
+        <h2>빠른 작업</h2>
+        <div class="action-buttons">
+            <a href="{{ url_for('users') }}" class="btn btn-primary">
+                회원 관리로 이동
+            </a>
+            <a href="{{ url_for('payments') }}" class="btn btn-success">
+                결제 관리로 이동
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
