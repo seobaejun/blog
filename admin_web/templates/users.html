@@ -125,11 +125,15 @@
 </div>
 
 <script>
-let currentEditingUserId = null;
-let currentEditingUserName = null;
+// DOMContentLoaded 이벤트로 감싸서 페이지 로드 후 실행 보장
+(function() {
+    'use strict';
+    
+    let currentEditingUserId = null;
+    let currentEditingUserName = null;
 
-// 전역 함수로 등록 (onclick에서 호출 가능하도록)
-window.showExpiryDateModal = function(userId, userName, currentExpiryDate) {
+    // 전역 함수로 등록 (onclick에서 호출 가능하도록)
+    window.showExpiryDateModal = function(userId, userName, currentExpiryDate) {
     console.log('=== showExpiryDateModal 호출됨 ===');
     console.log('userId:', userId);
     console.log('userName:', userName);
@@ -343,6 +347,16 @@ window.deleteUser = function(userId, userName) {
         alert('삭제 처리 중 오류가 발생했습니다.');
     });
 };
+
+    // 페이지 로드 완료 후 실행
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('✓ users.html 스크립트 로드 완료');
+        });
+    } else {
+        console.log('✓ users.html 스크립트 로드 완료 (이미 로드됨)');
+    }
+})();
 
 </script>
 {% endblock %}

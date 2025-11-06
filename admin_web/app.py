@@ -499,6 +499,68 @@ def users():
         
         print(f"✓ 총 {len(users_list)}명의 사용자 정보 수집 완료 (Firestore)")
         
+        # Realtime Database에서도 사용자 목록 조회 (회원가입 시 Realtime Database에 저장되는 경우 대비)
+        try:
+            print(f"\n🔍 Realtime Database에서 사용자 목록 조회 시도")
+            if db is not None:
+                try:
+                    users_rtdb = db.child("users").get()
+                    if users_rtdb and users_rtdb.val():
+                        rtdb_data = users_rtdb.val()
+                        print(f"✓ Realtime Database에서 {len(rtdb_data)}명의 사용자 조회 성공")
+                        
+                        # 이미 추가된 user_id 목록 (중복 방지)
+                        existing_user_ids = {user.get("user_id") for user in users_list}
+                        
+                        # Realtime Database 데이터를 users_list에 추가
+                        for user_id, user_data in rtdb_data.items():
+                            if user_id not in existing_user_ids:
+                                # Realtime Database 형식을 일반 딕셔너리로 변환
+                                user_info = {
+                                    "user_id": user_id,
+                                    "name": user_data.get("name", ""),
+                                    "username": user_data.get("username", ""),
+                                    "email": user_data.get("email", ""),
+                                    "phone": user_data.get("phone", ""),
+                                    "approved": user_data.get("approved", False),
+                                    "is_admin": user_data.get("is_admin", False),
+                                    "created_at": user_data.get("created_at", ""),
+                                    "expiry_date": user_data.get("expiry_date"),
+                                    "first_login_date": user_data.get("first_login_date"),
+                                    "approved_date": user_data.get("approved_date"),
+                                }
+                                users_list.append(user_info)
+                                print(f"  Realtime Database 사용자 추가: {user_info.get('email')} - 승인: {user_info.get('approved')}")
+                            else:
+                                # 이미 Firestore에 있는 경우, Realtime Database 데이터로 업데이트 (최신 정보)
+                                for idx, existing_user in enumerate(users_list):
+                                    if existing_user.get("user_id") == user_id:
+                                        # Realtime Database 데이터로 업데이트 (빈 값이 아닌 경우만)
+                                        if user_data.get("name"):
+                                            users_list[idx]["name"] = user_data.get("name")
+                                        if user_data.get("username"):
+                                            users_list[idx]["username"] = user_data.get("username")
+                                        if user_data.get("phone"):
+                                            users_list[idx]["phone"] = user_data.get("phone")
+                                        if "approved" in user_data:
+                                            users_list[idx]["approved"] = user_data.get("approved")
+                                        if "is_admin" in user_data:
+                                            users_list[idx]["is_admin"] = user_data.get("is_admin")
+                                        if user_data.get("expiry_date"):
+                                            users_list[idx]["expiry_date"] = user_data.get("expiry_date")
+                                        print(f"  Realtime Database 데이터로 업데이트: {user_id}")
+                                        break
+                    else:
+                        print("⚠ Realtime Database에 사용자 데이터가 없습니다.")
+                except Exception as rtdb_error:
+                    print(f"⚠ Realtime Database 조회 실패: {str(rtdb_error)}")
+            else:
+                print("⚠ Realtime Database 인스턴스가 없습니다.")
+        except Exception as rtdb_error:
+            print(f"⚠ Realtime Database 조회 중 오류: {str(rtdb_error)}")
+        
+        print(f"✓ 총 {len(users_list)}명의 사용자 정보 수집 완료 (Firestore + Realtime Database)")
+        
         # 승인 상태와 날짜로 정렬
         users_list.sort(key=lambda x: (
             not x.get("approved", False),
@@ -850,8 +912,13 @@ def update_expiry_date(user_id):
                 print(f"⚠ 기존 사용자 정보 조회 실패: {str(get_error)}")
             
             # 만료일을 Firestore timestamp 형식으로 변환
-            # expiry_date는 "YYYY-MM-DDTHH:MM:SS" 형식
-            expiry_timestamp = expiry_date.replace("T", "T").replace("Z", "")
+            # expiry_date는 "YYYY-MM-DD" 또는 "YYYY-MM-DDTHH:MM:SS" 형식
+            if 'T' in expiry_date:
+                expiry_timestamp = expiry_date.replace("Z", "")
+            else:
+                # YYYY-MM-DD 형식인 경우 시간 추가
+                expiry_timestamp = f"{expiry_date}T23:59:59"
+            
             if not expiry_timestamp.endswith("Z"):
                 expiry_timestamp = f"{expiry_timestamp}Z"
             
@@ -876,29 +943,38 @@ def update_expiry_date(user_id):
             print(f"   HTTP 응답 코드: {response.status_code}")
             print(f"   응답 내용: {response.text[:300]}")
             
+            firestore_success = False
             if response.status_code in [200, 201]:
                 print(f"✓ Firestore에 만료일 저장 성공")
-                # 저장 확인
-                verify_response = requests.get(firestore_url, headers=headers, timeout=5)
-                if verify_response.status_code == 200:
-                    saved_doc = verify_response.json()
-                    if saved_doc and "fields" in saved_doc:
-                        saved_expiry = saved_doc["fields"].get("expiry_date", {}).get("timestampValue", "")
-                        print(f"✓ 저장 확인: expiry_date={saved_expiry}")
-                        return jsonify({
-                            'success': True, 
-                            'message': f'이용만료일이 {expiry_date[:10]}로 변경되었습니다.'
-                        })
+                firestore_success = True
+            else:
+                error_msg = f"Firestore HTTP {response.status_code}: {response.text[:200]}"
+                print(f"⚠ {error_msg}")
+            
+            # Realtime Database에도 저장
+            rtdb_success = False
+            try:
+                if db is not None:
+                    print(f"🔍 Realtime Database 만료일 저장 시도: user_id={user_id}, expiry_date={expiry_date}")
+                    # Realtime Database에 저장
+                    db.child("users").child(user_id).update({"expiry_date": expiry_date})
+                    print(f"✓ Realtime Database에 만료일 저장 성공")
+                    rtdb_success = True
+                else:
+                    print("⚠ Realtime Database 인스턴스가 없습니다.")
+            except Exception as rtdb_error:
+                print(f"⚠ Realtime Database 저장 실패: {str(rtdb_error)}")
+            
+            # 둘 중 하나라도 성공하면 성공으로 처리
+            if firestore_success or rtdb_success:
                 return jsonify({
                     'success': True, 
                     'message': f'이용만료일이 {expiry_date[:10]}로 변경되었습니다.'
                 })
             else:
-                error_msg = f"Firestore HTTP {response.status_code}: {response.text[:200]}"
-                print(f"❌ {error_msg}")
                 return jsonify({
                     'success': False, 
-                    'message': f'Firestore 저장 실패: {error_msg[:100]}'
+                    'message': f'Firestore 및 Realtime Database 저장 모두 실패했습니다.'
                 }), 500
         except Exception as db_error:
             import traceback
