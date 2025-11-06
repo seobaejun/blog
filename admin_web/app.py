@@ -2,6 +2,7 @@
 관리자 페이지 Flask 애플리케이션
 """
 import sys
+import os
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from datetime import datetime, timedelta
@@ -15,7 +16,8 @@ from src.firebase_config import get_auth, get_db
 from src.auth_manager import AuthManager
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this-in-production'  # 프로덕션에서는 환경 변수로 관리
+# SECRET_KEY를 환경 변수에서 읽거나 기본값 사용
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-change-this-in-production')
 
 # Firebase 인스턴스 (에러 발생 시에도 앱 로드 가능하도록 try-except 사용)
 try:
@@ -77,6 +79,8 @@ def login():
         email = request.form.get('email', '').strip()
         password = request.form.get('password', '').strip()
         
+        print(f"🔐 로그인 시도: email={email}")
+        
         if not email or not password:
             flash('이메일과 비밀번호를 입력해주세요.', 'error')
             return render_template('login.html')
@@ -94,13 +98,17 @@ def login():
                 auth = get_auth()
                 print("✓ Firebase 재초기화 성공")
             except Exception as init_error:
+                import traceback
                 print(f"✗ Firebase 재초기화 실패: {init_error}")
+                traceback.print_exc()
                 flash(f'Firebase 초기화 오류: {str(init_error)}', 'error')
                 return render_template('login.html')
         
         try:
             # Firebase Authentication 로그인
+            print(f"🔍 Firebase 인증 시도 중...")
             user_info = auth.sign_in_with_email_and_password(email, password)
+            print(f"✓ Firebase 인증 성공: user_id={user_info.get('localId', 'N/A')}")
             user_id = user_info.get("localId", "")
             id_token = user_info.get("idToken", "")
             
@@ -263,11 +271,17 @@ def login():
             return redirect(url_for('dashboard'))
         
         except Exception as e:
+            import traceback
             error_message = str(e)
+            print(f"❌ 로그인 오류 발생: {error_message}")
+            traceback.print_exc()
+            
             if "INVALID_PASSWORD" in error_message or "EMAIL_NOT_FOUND" in error_message:
                 flash('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.', 'error')
+            elif "INVALID_EMAIL" in error_message:
+                flash('올바른 이메일 형식이 아닙니다.', 'error')
             else:
-                flash(f'로그인 중 오류가 발생했습니다: {error_message}', 'error')
+                flash(f'로그인 중 오류가 발생했습니다: {error_message[:100]}', 'error')
     
     return render_template('login.html')
 
