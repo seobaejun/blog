@@ -1,30 +1,56 @@
 """
 Vercel Serverless Function for Flask App
-최소한의 테스트 앱으로 시작
 """
-from flask import Flask
+import sys
+import os
+from pathlib import Path
+import traceback
 
-# 최소한의 Flask 앱 생성
-app = Flask(__name__)
+# 프로젝트 루트를 Python 경로에 추가
+try:
+    project_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(project_root))
+except Exception as e:
+    print(f"Failed to set project root: {e}", file=sys.stderr)
 
-@app.route('/')
-def index():
-    return '''
-    <html>
-    <head><title>Vercel Flask Test</title></head>
-    <body style="font-family: Arial; padding: 20px;">
-    <h1>✅ Vercel Flask 앱이 정상적으로 작동합니다!</h1>
-    <p>이 메시지가 보이면 Flask 앱이 Vercel에서 정상적으로 실행되고 있습니다.</p>
-    <hr>
-    <h2>다음 단계:</h2>
-    <p>이제 실제 관리자 페이지 앱을 로드하도록 수정하겠습니다.</p>
-    </body>
-    </html>
-    '''
+# Vercel 환경 설정
+os.environ.setdefault('FLASK_ENV', 'production')
 
-@app.route('/test')
-def test():
-    return '<h1>Test Route</h1><p>테스트 라우트가 작동합니다!</p>'
+# 실제 Flask 앱 import 시도
+try:
+    from admin_web.app import app
+    print("✅ Admin app loaded successfully!", file=sys.stderr)
+except Exception as e:
+    # 에러 발생 시 상세한 에러 페이지 앱 생성
+    from flask import Flask
+    error_app = Flask(__name__)
+    
+    @error_app.route('/', defaults={'path': ''})
+    @error_app.route('/<path:path>')
+    def error_handler(path):
+        error_html = f"""
+        <html>
+        <head><title>Flask 앱 로드 오류</title></head>
+        <body style="font-family: Arial; padding: 20px;">
+        <h1>Flask 앱 로드 오류</h1>
+        <h2>에러 메시지:</h2>
+        <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto;">{str(e)}</pre>
+        <h2>Traceback:</h2>
+        <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto;">{traceback.format_exc()}</pre>
+        <h2>디버깅 정보:</h2>
+        <ul>
+        <li>Project root: {project_root if 'project_root' in locals() else 'N/A'}</li>
+        <li>Config exists: {(project_root / 'config.json').exists() if 'project_root' in locals() else 'N/A'}</li>
+        <li>Python path: {sys.path[:3]}</li>
+        </ul>
+        </body>
+        </html>
+        """
+        return error_html, 500
+    
+    app = error_app
+    print(f"❌ Failed to load admin app: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
 
 __all__ = ['app']
 
