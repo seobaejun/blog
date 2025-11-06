@@ -2,7 +2,7 @@
 Flask==3.0.0
 pyrebase4==4.7.1
 python-dotenv>=1.0.0
-requests>=2.31.0
+requests>=2.19.1,<2.30
 
 # 로컬 개발용 (Vercel 배포 시 제외됨)
 # firebase-admin>=6.4.0
