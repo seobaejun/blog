@@ -6,6 +6,7 @@
     "storageBucket": "blog-cdc9b.firebasestorage.app",
     "messagingSenderId": "1025951916921",
     "appId": "1:1025951916921:web:7ecf732013c947810045a8",
-    "measurementId": "G-R1VMNHG7WL"
+    "measurementId": "G-R1VMNHG7WL",
+    "databaseURL": "https://blog-cdc9b-default-rtdb.firebaseio.com"
   }
 }

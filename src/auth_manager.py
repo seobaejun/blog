@@ -4,7 +4,7 @@ Firebase 인증 관리 모듈
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
-from src.firebase_config import get_auth
+from src.firebase_config import get_auth, get_db
 
 
 class AuthManager:
@@ -13,8 +13,7 @@ class AuthManager:
     def __init__(self):
         """인증 관리자 초기화"""
         self.auth = get_auth()
-        # Realtime Database는 더 이상 사용하지 않음 (Firestore만 사용)
-        # self.db = get_db()  # 제거됨
+        self.db = get_db()
         self.user = None
         self.token = None
         # Vercel 서버리스 환경에서는 파일 시스템이 읽기 전용이므로

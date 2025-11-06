@@ -12,7 +12,7 @@ import json
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.firebase_config import get_auth
+from src.firebase_config import get_auth, get_db
 from src.auth_manager import AuthManager
 
 # Flask 앱 초기화 (static 폴더 명시적 지정)
@@ -24,8 +24,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-change-this-in-p
 # Firebase 인스턴스 (에러 발생 시에도 앱 로드 가능하도록 try-except 사용)
 try:
     auth_manager = AuthManager()
-    # Realtime Database는 더 이상 사용하지 않음 (Firestore만 사용)
-    # db = get_db()  # 제거됨
+    db = get_db()
     auth = get_auth()
 except Exception as e:
     # Firebase 초기화 실패해도 앱은 로드됨 (실제 사용 시점에 에러 발생)
@@ -34,7 +33,7 @@ except Exception as e:
     traceback.print_exc()
     # 더미 객체로 설정 (실제 사용 시 에러 발생)
     auth_manager = None
-    # db = None  # 제거됨
+    db = None
     auth = None
 
 
@@ -107,14 +106,15 @@ def login():
             return render_template('login.html')
         
         # Firebase 인스턴스 확인 및 재초기화
-        global auth_manager, auth
+        global auth_manager, db, auth
         
-        if auth is None:
+        if auth is None or db is None:
             flash('Firebase가 초기화되지 않았습니다. 서버 설정을 확인해주세요.', 'error')
             print("⚠ Firebase 인스턴스가 None입니다. 초기화를 다시 시도합니다.")
             try:
                 # 재초기화 시도
                 auth_manager = AuthManager()
+                db = get_db()
                 auth = get_auth()
                 print("✓ Firebase 재초기화 성공")
             except Exception as init_error:
