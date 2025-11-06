@@ -36,25 +36,62 @@
                     </td>
                     <td>{{ user.created_at[:10] if user.created_at else '-' }}</td>
                     <td>
-                        {% if user.expiry_date %}
-                            {% set expiry_str = user.expiry_date[:10] %}
-                            {{ expiry_str }}
-                            {% set today_str = today[:10] if today else '' %}
-                            {% if today_str and expiry_str < today_str %}
-                                <span class="badge badge-danger">만료</span>
+                        {% if user.approved %}
+                            {% if user.expiry_date %}
+                                {% set expiry_str = user.expiry_date[:10] %}
+                                <button type="button" 
+                                        class="expiry-date-btn" 
+                                        onclick="window.showExpiryDateModal('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}', '{{ expiry_str }}');"
+                                        style="background: none; border: none; color: #007bff; text-decoration: underline; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: 14px; font-weight: 500;"
+                                        onmouseover="this.style.backgroundColor='#e7f3ff'; this.style.textDecoration='none';"
+                                        onmouseout="this.style.backgroundColor='transparent'; this.style.textDecoration='underline';"
+                                        title="클릭하여 만료일 수정">
+                                    {{ expiry_str }}
+                                </button>
+                                {% set today_str = today[:10] if today else '' %}
+                                {% if today_str and expiry_str < today_str %}
+                                    <span class="badge badge-danger" style="margin-left: 8px;">만료</span>
+                                {% endif %}
+                            {% else %}
+                                <button type="button" 
+                                        class="expiry-date-btn" 
+                                        onclick="window.showExpiryDateModal('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}', '');"
+                                        style="background: none; border: none; color: #007bff; text-decoration: underline; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: 14px; font-weight: 500;"
+                                        onmouseover="this.style.backgroundColor='#e7f3ff'; this.style.textDecoration='none';"
+                                        onmouseout="this.style.backgroundColor='transparent'; this.style.textDecoration='underline';"
+                                        title="클릭하여 만료일 설정">
+                                    미설정 (클릭하여 설정)
+                                </button>
                             {% endif %}
                         {% else %}
-                            -
+                            {% if user.expiry_date %}
+                                {% set expiry_str = user.expiry_date[:10] %}
+                                {{ expiry_str }}
+                                {% set today_str = today[:10] if today else '' %}
+                                {% if today_str and expiry_str < today_str %}
+                                    <span class="badge badge-danger">만료</span>
+                                {% endif %}
+                            {% else %}
+                                -
+                            {% endif %}
                         {% endif %}
                     </td>
                     <td>
-                        {% if not user.approved %}
-                            <button class="btn btn-sm btn-success" onclick="approveUser('{{ user.user_id }}', '{{ user.name or user.email }}')">
-                                승인
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            {% if not user.approved %}
+                                <button class="btn btn-sm btn-success" onclick="window.approveUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #28a745;">
+                                    승인
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="window.rejectUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #dc3545;">
+                                    거부
+                                </button>
+                            {% else %}
+                                <span class="text-muted" style="margin-right: 8px;">-</span>
+                            {% endif %}
+                            <button class="btn btn-sm btn-danger" onclick="window.deleteUser('{{ user.user_id }}', '{{ (user.name or user.email)|replace("'", "\\'")|replace('"', '\\"') }}'); return false;" style="background-color: #dc3545; min-width: 60px; padding: 6px 12px; cursor: pointer; border: 1px solid #c82333; color: white;">
+                                삭제
                             </button>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% else %}
@@ -67,8 +104,164 @@
     </div>
 </div>
 
+<!-- 이용만료일 수정 모달 -->
+<div id="expiryDateModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+    <div style="background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h2 style="margin-top: 0;">이용만료일 수정</h2>
+        <p id="modalUserName" style="margin-bottom: 15px; color: #666;"></p>
+        <div style="margin-bottom: 20px;">
+            <label for="expiryDateInput" style="display: block; margin-bottom: 5px; font-weight: bold;">만료일:</label>
+            <input type="date" id="expiryDateInput" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        </div>
+        <div style="text-align: right;">
+            <button onclick="window.closeExpiryDateModal()" style="padding: 8px 16px; margin-right: 10px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                취소
+            </button>
+            <button onclick="window.saveExpiryDate()" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                수정
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
-function approveUser(userId, userName) {
+let currentEditingUserId = null;
+let currentEditingUserName = null;
+
+// 전역 함수로 등록 (onclick에서 호출 가능하도록)
+window.showExpiryDateModal = function(userId, userName, currentExpiryDate) {
+    console.log('=== showExpiryDateModal 호출됨 ===');
+    console.log('userId:', userId);
+    console.log('userName:', userName);
+    console.log('currentExpiryDate:', currentExpiryDate);
+    
+    // 즉시 피드백 (디버깅용)
+    if (!userId || userId === 'None' || userId === '' || userId === 'undefined') {
+        alert('오류: 사용자 ID가 없습니다. userId=' + userId);
+        console.error('사용자 ID가 없습니다:', userId);
+        return;
+    }
+    
+    currentEditingUserId = userId;
+    currentEditingUserName = userName;
+    
+    const modalUserNameEl = document.getElementById('modalUserName');
+    if (modalUserNameEl) {
+        modalUserNameEl.textContent = `회원: ${userName}`;
+        console.log('✓ 회원 이름 설정 완료');
+    } else {
+        console.error('❌ modalUserName 요소를 찾을 수 없습니다');
+        alert('오류: 모달 요소를 찾을 수 없습니다. 페이지를 새로고침해주세요.');
+        return;
+    }
+    
+    // 현재 만료일을 입력 필드에 설정
+    const dateInput = document.getElementById('expiryDateInput');
+    if (dateInput) {
+        if (currentExpiryDate && currentExpiryDate !== 'None' && currentExpiryDate !== '' && currentExpiryDate !== 'undefined') {
+            dateInput.value = currentExpiryDate;
+            console.log('✓ 만료일 설정:', currentExpiryDate);
+        } else {
+            // 만료일이 없으면 오늘 날짜를 기본값으로
+            const today = new Date().toISOString().split('T')[0];
+            dateInput.value = today;
+            console.log('✓ 오늘 날짜로 설정:', today);
+        }
+    } else {
+        console.error('❌ dateInput 요소를 찾을 수 없습니다');
+        alert('오류: 날짜 입력 필드를 찾을 수 없습니다. 페이지를 새로고침해주세요.');
+        return;
+    }
+    
+    // 모달 표시
+    const modal = document.getElementById('expiryDateModal');
+    if (modal) {
+        modal.style.display = 'block';
+        console.log('✓ 모달 표시됨');
+    } else {
+        console.error('❌ expiryDateModal 요소를 찾을 수 없습니다');
+        alert('오류: 모달을 찾을 수 없습니다. 페이지를 새로고침해주세요.');
+    }
+};
+
+window.closeExpiryDateModal = function() {
+    const modal = document.getElementById('expiryDateModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    currentEditingUserId = null;
+    currentEditingUserName = null;
+};
+
+window.saveExpiryDate = function() {
+    if (!currentEditingUserId) {
+        console.error('사용자 ID가 없습니다.');
+        alert('오류: 사용자 ID가 없습니다.');
+        return;
+    }
+    
+    const dateInput = document.getElementById('expiryDateInput');
+    if (!dateInput) {
+        console.error('날짜 입력 필드를 찾을 수 없습니다.');
+        alert('오류: 날짜 입력 필드를 찾을 수 없습니다.');
+        return;
+    }
+    
+    const newDate = dateInput.value;
+    console.log('만료일 수정 시도:', { userId: currentEditingUserId, newDate: newDate });
+    
+    if (!newDate) {
+        alert('날짜를 선택해주세요.');
+        return;
+    }
+    
+    // 서버에 요청
+    const url = `/users/update-expiry/${currentEditingUserId}`;
+    console.log('요청 URL:', url);
+    console.log('요청 데이터:', { expiry_date: newDate });
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            expiry_date: newDate
+        })
+    })
+    .then(response => {
+        console.log('응답 상태:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('서버 응답:', data);
+        if (data.success) {
+            alert(data.message);
+            window.closeExpiryDateModal();
+            location.reload();
+        } else {
+            alert('오류: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('만료일 수정 중 오류가 발생했습니다: ' + error.message);
+    });
+};
+
+// 모달 외부 클릭 시 닫기
+window.addEventListener('click', function(event) {
+    const modal = document.getElementById('expiryDateModal');
+    if (event.target == modal) {
+        window.closeExpiryDateModal();
+    }
+});
+// 전역 함수로 등록
+window.approveUser = function(userId, userName) {
+    console.log('승인 버튼 클릭:', userId, userName);
     if (!confirm(`정말로 "${userName}" 회원을 승인하시겠습니까?`)) {
         return;
     }
@@ -92,6 +285,64 @@ function approveUser(userId, userName) {
         console.error('Error:', error);
         alert('승인 처리 중 오류가 발생했습니다.');
     });
-}
+};
+
+window.rejectUser = function(userId, userName) {
+    if (!confirm(`정말로 "${userName}" 회원을 거부하시겠습니까?\n\n거부된 회원은 로그인할 수 없습니다.`)) {
+        return;
+    }
+    
+    fetch(`/users/reject/${userId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('오류: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('거부 처리 중 오류가 발생했습니다.');
+    });
+};
+
+window.deleteUser = function(userId, userName) {
+    if (!confirm(`⚠ 경고: 정말로 "${userName}" 회원을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
+        return;
+    }
+    
+    // 한 번 더 확인
+    if (!confirm(`최종 확인: "${userName}" 회원을 삭제하시겠습니까?`)) {
+        return;
+    }
+    
+    fetch(`/users/delete/${userId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('오류: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('삭제 처리 중 오류가 발생했습니다.');
+    });
+};
+
 </script>
 {% endblock %}

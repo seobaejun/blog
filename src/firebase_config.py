@@ -33,7 +33,6 @@ class FirebaseConfig:
             'messagingSenderId': 'FIREBASE_MESSAGING_SENDER_ID',
             'appId': 'FIREBASE_APP_ID',
             'measurementId': 'FIREBASE_MEASUREMENT_ID',
-            'databaseURL': 'FIREBASE_DATABASE_URL'
         }
         
         # 환경 변수에서 모든 값이 있는지 확인
@@ -72,18 +71,49 @@ class FirebaseConfig:
             except json.JSONDecodeError:
                 raise ValueError(f"config.json 파일이 올바른 JSON 형식이 아닙니다.")
         
-        # databaseURL이 없으면 자동 생성
-        if "databaseURL" not in self.config:
-            project_id = self.config.get("projectId")
-            if project_id:
-                self.config["databaseURL"] = f"https://{project_id}-default-rtdb.firebaseio.com"
+        # databaseURL 제거 (Realtime Database는 사용하지 않음)
+        if "databaseURL" in self.config:
+            # Realtime Database URL 제거 (Firestore만 사용)
+            del self.config["databaseURL"]
+            print("⚠ databaseURL이 제거되었습니다. Realtime Database는 사용하지 않습니다.")
     
     def _initialize_firebase(self):
-        """Firebase 초기화"""
+        """Firebase 초기화 (Realtime Database는 완전히 차단)"""
         try:
-            self.firebase = pyrebase.initialize_app(self.config)
+            # databaseURL이 없으면 pyrebase가 Realtime Database를 초기화하지 않음
+            # Firestore는 REST API로 직접 사용하므로 pyrebase 초기화는 Auth만 필요
+            
+            # config 복사본 생성 (원본 수정 방지)
+            init_config = self.config.copy()
+            
+            # databaseURL이 있으면 제거 (혹시 모를 경우 대비)
+            if "databaseURL" in init_config:
+                del init_config["databaseURL"]
+                print("⚠ databaseURL이 제거되었습니다.")
+            
+            self.firebase = pyrebase.initialize_app(init_config)
             self.auth = self.firebase.auth()
-            self.db = self.firebase.database()
+            
+            # Realtime Database는 절대 초기화하지 않음
+            # self.db = self.firebase.database()  # 완전히 제거됨
+            self.db = None
+            
+            print("✓ Firebase 초기화 완료 (Auth만 사용)")
+            print("⚠ Realtime Database는 완전히 차단되었습니다.")
+            print("   모든 데이터는 Firestore에만 저장됩니다.")
+        except KeyError as e:
+            if "databaseURL" in str(e):
+                # databaseURL이 없어서 발생한 오류는 정상 (의도된 동작)
+                # config에서 databaseURL을 제거하고 다시 시도
+                init_config = self.config.copy()
+                if "databaseURL" in init_config:
+                    del init_config["databaseURL"]
+                self.firebase = pyrebase.initialize_app(init_config)
+                self.auth = self.firebase.auth()
+                self.db = None
+                print("✓ Firebase 초기화 완료 (databaseURL 제거 후 재시도)")
+            else:
+                raise RuntimeError(f"Firebase 초기화 실패: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"Firebase 초기화 실패: {str(e)}")
     
@@ -94,10 +124,9 @@ class FirebaseConfig:
         return self.auth
     
     def get_db(self):
-        """Firebase Database 인스턴스 반환"""
-        if self.db is None:
-            raise RuntimeError("Firebase가 초기화되지 않았습니다.")
-        return self.db
+        """Firebase Database 인스턴스 반환 (더 이상 사용하지 않음)"""
+        # Realtime Database는 더 이상 사용하지 않음
+        raise RuntimeError("Realtime Database는 더 이상 사용하지 않습니다. Firestore를 사용하세요.")
 
 
 # 전역 Firebase 인스턴스

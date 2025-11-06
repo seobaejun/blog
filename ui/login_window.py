@@ -264,7 +264,19 @@ class LoginWindow:
                     self.on_login_success()
         
         except Exception as e:
-            messagebox.showerror("로그인 실패", str(e))
+            error_message = str(e)
+            # 이용만료일 체크
+            if error_message == "EXPIRY_DATE_EXPIRED":
+                # 이용만료 안내 팝업
+                expiry_message = (
+                    "이용 기간이 만료되었습니다.\n\n"
+                    "부스트웹 3333-32-0313102 카카오뱅크\n"
+                    "9,900원을 입금하시면 30일 연장됩니다.\n\n"
+                    "입금 후 관리자에게 문의해주세요."
+                )
+                messagebox.showwarning("이용 기간 만료", expiry_message)
+            else:
+                messagebox.showerror("로그인 실패", error_message)
     
     def _handle_signup(self):
         """회원가입 처리"""
@@ -309,18 +321,72 @@ class LoginWindow:
         
         try:
             # 회원가입 시도
+            print(f"\n{'='*60}")
+            print(f"[GUI] 회원가입 시도")
+            print(f"  이름: {name}")
+            print(f"  이메일: {email}")
+            print(f"  사용자명: {username}")
+            print(f"  전화번호: {phone}")
+            print(f"{'='*60}\n")
+            
             result = self.auth_manager.signup(name, username, email, password, phone)
             
+            print(f"\n[GUI] 회원가입 결과:")
+            print(f"  Success: {result.get('success')}")
+            print(f"  Message: {result.get('message')}")
+            print(f"  User ID: {result.get('user_id')}\n")
+            
             if result.get("success"):
+                # Firestore 저장 확인
+                try:
+                    import requests
+                    user_id = result.get('user_id')
+                    if user_id:
+                        # Firestore에서 확인
+                        project_id = "blog-cdc9b"
+                        firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+                        
+                        # 토큰 가져오기 (회원가입 후 토큰)
+                        token = self.auth_manager.token
+                        if token:
+                            headers = {
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json"
+                            }
+                            verify_response = requests.get(firestore_url, headers=headers, timeout=5)
+                            if verify_response.status_code == 200:
+                                saved_doc = verify_response.json()
+                                if saved_doc and "fields" in saved_doc:
+                                    saved_email = saved_doc["fields"].get("email", {}).get("stringValue", "")
+                                    print(f"[GUI] ✓ Firestore 저장 확인 성공!")
+                                    print(f"  저장된 이메일: {saved_email}")
+                                else:
+                                    print(f"[GUI] ⚠ Firestore에 데이터가 없습니다!")
+                            else:
+                                print(f"[GUI] ⚠ Firestore 확인 실패: HTTP {verify_response.status_code}")
+                        else:
+                            print(f"[GUI] ⚠ 토큰이 없어 확인할 수 없습니다.")
+                except Exception as verify_error:
+                    print(f"[GUI] ⚠ 저장 확인 중 오류: {str(verify_error)}")
+                
                 messagebox.showinfo(
                     "회원가입 완료", 
-                    result.get("message", "회원가입이 완료되었습니다.")
+                    f"{result.get('message', '회원가입이 완료되었습니다.')}\n\n"
+                    f"User ID: {result.get('user_id', 'N/A')}\n"
+                    f"관리자 승인 후 로그인할 수 있습니다."
                 )
                 # 로그인 탭으로 전환
                 self.notebook.select(0)
+            else:
+                messagebox.showerror("회원가입 실패", result.get("message", "회원가입에 실패했습니다."))
         
         except Exception as e:
-            messagebox.showerror("회원가입 실패", str(e))
+            import traceback
+            error_msg = str(e)
+            print(f"\n[GUI] ❌ 회원가입 오류:")
+            print(f"  {error_msg}")
+            traceback.print_exc()
+            messagebox.showerror("회원가입 실패", f"회원가입 중 오류가 발생했습니다:\n\n{error_msg}")
 
 
 def show_login_window(on_login_success=None):

@@ -13,9 +13,10 @@ body {
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 1600px;
     margin: 0 auto;
     padding: 20px;
+    width: 95%;
 }
 
 /* 네비게이션 바 */
@@ -27,7 +28,7 @@ body {
 }
 
 .nav-container {
-    max-width: 1200px;
+    max-width: 1600px;
     margin: 0 auto;
     padding: 0 20px;
     display: flex;
@@ -173,6 +174,8 @@ body {
 .btn-sm {
     padding: 6px 12px;
     font-size: 12px;
+    min-width: 50px;
+    display: inline-block;
 }
 
 .btn-block {
@@ -284,11 +287,15 @@ body {
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     overflow-x: auto;
+    width: 100%;
+    margin: 0;
 }
 
 .data-table {
     width: 100%;
     border-collapse: collapse;
+    min-width: 1200px;
+    table-layout: auto;
 }
 
 .data-table thead {
@@ -297,14 +304,16 @@ body {
 }
 
 .data-table th {
-    padding: 15px;
+    padding: 15px 20px;
     text-align: left;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .data-table td {
-    padding: 12px 15px;
+    padding: 12px 20px;
     border-bottom: 1px solid #eee;
+    white-space: nowrap;
 }
 
 .data-table tbody tr:hover {

@@ -12,17 +12,20 @@ import json
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.firebase_config import get_auth, get_db
+from src.firebase_config import get_auth
 from src.auth_manager import AuthManager
 
-app = Flask(__name__)
+# Flask 앱 초기화 (static 폴더 명시적 지정)
+static_folder = Path(__file__).parent / 'static'
+app = Flask(__name__, static_folder=str(static_folder), static_url_path='/static')
 # SECRET_KEY를 환경 변수에서 읽거나 기본값 사용
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-change-this-in-production')
 
 # Firebase 인스턴스 (에러 발생 시에도 앱 로드 가능하도록 try-except 사용)
 try:
     auth_manager = AuthManager()
-    db = get_db()
+    # Realtime Database는 더 이상 사용하지 않음 (Firestore만 사용)
+    # db = get_db()  # 제거됨
     auth = get_auth()
 except Exception as e:
     # Firebase 초기화 실패해도 앱은 로드됨 (실제 사용 시점에 에러 발생)
@@ -31,7 +34,7 @@ except Exception as e:
     traceback.print_exc()
     # 더미 객체로 설정 (실제 사용 시 에러 발생)
     auth_manager = None
-    db = None
+    # db = None  # 제거됨
     auth = None
 
 
@@ -46,12 +49,30 @@ def check_admin():
         return True
     
     try:
-        # 데이터베이스에서 관리자 정보 확인 (가능한 경우)
-        user_data = db.child("users").child(session['user_id']).get().val()
-        if user_data and user_data.get("is_admin", False):
-            return True
+        # Firestore에서 관리자 정보 확인
+        import requests
+        project_id = "blog-cdc9b"
+        user_id = session.get('user_id')
+        id_token = session.get('token')
+        
+        if not id_token:
+            return False
+        
+        firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+        headers = {
+            "Authorization": f"Bearer {id_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(firestore_url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            firestore_doc = response.json()
+            if "fields" in firestore_doc:
+                is_admin = firestore_doc["fields"].get("is_admin", {}).get("booleanValue", False)
+                if is_admin:
+                    return True
     except Exception as e:
-        # 데이터베이스 오류는 무시 (세션 기반으로 작동)
+        # Firestore 오류는 무시 (세션 기반으로 작동)
         pass
     
     return False
@@ -94,7 +115,7 @@ def login():
             try:
                 # 재초기화 시도
                 auth_manager = AuthManager()
-                db = get_db()
+                # db = get_db()  # Realtime Database는 더 이상 사용하지 않음
                 auth = get_auth()
                 print("✓ Firebase 재초기화 성공")
             except Exception as init_error:
@@ -102,7 +123,7 @@ def login():
                 print(f"✗ Firebase 재초기화 실패: {init_error}")
                 traceback.print_exc()
                 flash(f'Firebase 초기화 오류: {str(init_error)}', 'error')
-                return render_template('login.html')
+            return render_template('login.html')
         
         try:
             # Firebase Authentication 로그인
@@ -114,11 +135,37 @@ def login():
             
             # 관리자 권한 확인 및 데이터베이스 정보 저장
             user_data = None
+            
+            # 1. Firestore에서 먼저 조회 시도
             try:
-                user_data = db.child("users").child(user_id).get().val()
-            except Exception as e:
-                print(f"⚠ 사용자 데이터 조회 실패: {str(e)}")
-                user_data = None
+                import requests
+                project_id = "blog-cdc9b"
+                firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+                headers = {
+                    "Authorization": f"Bearer {id_token}",
+                    "Content-Type": "application/json"
+                }
+                response = requests.get(firestore_url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    firestore_doc = response.json()
+                    if "fields" in firestore_doc:
+                        fields = firestore_doc["fields"]
+                        user_data = {
+                            "user_id": user_id,
+                            "email": fields.get("email", {}).get("stringValue", email),
+                            "name": fields.get("name", {}).get("stringValue", "관리자"),
+                            "approved": fields.get("approved", {}).get("booleanValue", False),
+                            "is_admin": fields.get("is_admin", {}).get("booleanValue", False),
+                            "created_at": fields.get("created_at", {}).get("timestampValue", ""),
+                            "last_login": datetime.now().isoformat()
+                        }
+                        print(f"✓ Firestore에서 사용자 정보 조회 성공")
+            except Exception as firestore_error:
+                print(f"⚠ Firestore 조회 실패: {str(firestore_error)}")
+            
+            # Firestore에서 사용자 정보를 못 가져왔으면 기본 정보 생성
+            if not user_data:
+                print(f"⚠ Firestore에 사용자 정보가 없습니다. 기본 정보를 생성합니다.")
             
             # 관리자 정보 준비
             admin_info = {
@@ -154,108 +201,47 @@ def login():
                     user_data["approved"] = True
                 user_data["last_login"] = datetime.now().isoformat()
             
-            # 데이터베이스에 반드시 저장 (여러 방법 시도)
+            # Firestore에 사용자 정보 저장
             saved_to_db = False
-            save_errors = []
-            
-            # 방법 1: 인증 없이 저장 시도 (규칙이 허용하는 경우) - 먼저 시도
             try:
                 import requests
-                database_url = "https://blog-cdc9b-default-rtdb.firebaseio.com"
-                path = f"/users/{user_id}.json"
-                url = f"{database_url}{path}"
-                print(f"🔍 데이터베이스 저장 시도 (인증 없이): {url}")
-                print(f"   저장할 데이터: {json.dumps(user_data, indent=2, ensure_ascii=False)[:200]}")
-                response = requests.put(url, json=user_data, timeout=10)
-                print(f"   응답 코드: {response.status_code}")
-                print(f"   응답 내용: {response.text[:500]}")
+                project_id = "blog-cdc9b"
+                firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
                 
-                if response.status_code == 200:
-                    print(f"✓ 인증 없이 사용자 정보 저장 성공!")
+                # Firestore 문서 형식으로 변환
+                now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                firestore_doc = {
+                    "fields": {
+                        "user_id": {"stringValue": user_id},
+                        "email": {"stringValue": user_data.get("email", email)},
+                        "name": {"stringValue": user_data.get("name", "관리자")},
+                        "approved": {"booleanValue": user_data.get("approved", is_admin_email)},
+                        "is_admin": {"booleanValue": user_data.get("is_admin", is_admin_email)},
+                        "created_at": {"timestampValue": user_data.get("created_at", now_iso) if isinstance(user_data.get("created_at"), str) and "T" in user_data.get("created_at", "") else now_iso},
+                        "last_login": {"timestampValue": now_iso}
+                    }
+                }
+                
+                headers = {
+                    "Authorization": f"Bearer {id_token}",
+                    "Content-Type": "application/json"
+                }
+                
+                print(f"🔍 Firestore에 사용자 정보 저장 시도")
+                response = requests.patch(firestore_url, json=firestore_doc, headers=headers, timeout=10)
+                print(f"   HTTP 응답 코드: {response.status_code}")
+                
+                if response.status_code in [200, 201]:
+                    print(f"✓ Firestore에 사용자 정보 저장 성공")
                     saved_to_db = True
-                    # 저장 확인
-                    verify_response = requests.get(url, timeout=5)
-                    if verify_response.status_code == 200:
-                        print(f"✓ 저장 확인 완료: {verify_response.text[:200]}")
-                elif response.status_code == 401:
-                    error_msg = response.text
-                    print(f"⚠ 401 Permission denied 오류")
-                    print(f"   규칙이 게시되지 않았거나 적용되지 않았을 수 있습니다.")
-                    print(f"   Firebase Console에서 규칙을 확인하고 '게시' 버튼을 눌러주세요.")
-                    save_errors.append(f"인증 없이 HTTP 401: Permission denied (규칙 확인 필요)")
                 else:
-                    save_errors.append(f"인증 없이 HTTP {response.status_code}: {response.text[:200]}")
-            except Exception as no_auth_error:
-                error_str = str(no_auth_error)
-                print(f"   예외 발생: {error_str[:300]}")
-                save_errors.append(f"인증 없이: {error_str[:200]}")
+                    print(f"⚠ Firestore 저장 실패: HTTP {response.status_code}")
+                    print(f"   응답: {response.text[:300]}")
+            except Exception as firestore_save_error:
+                print(f"⚠ Firestore 저장 실패: {str(firestore_save_error)}")
             
-            # 방법 2: REST API로 직접 저장 시도 (인증 토큰 사용)
             if not saved_to_db:
-                try:
-                    import requests
-                    database_url = "https://blog-cdc9b-default-rtdb.firebaseio.com"
-                    path = f"/users/{user_id}.json"
-                    url = f"{database_url}{path}?auth={id_token}"
-                    print(f"🔍 데이터베이스 저장 시도 (토큰 인증): {url[:100]}...")
-                    response = requests.put(url, json=user_data, timeout=10)
-                    print(f"   응답 코드: {response.status_code}")
-                    print(f"   응답 내용: {response.text[:300]}")
-                    if response.status_code == 200:
-                        print(f"✓ REST API로 사용자 정보 저장 성공")
-                        saved_to_db = True
-                    else:
-                        save_errors.append(f"REST API HTTP {response.status_code}: {response.text[:200]}")
-                except Exception as rest_error:
-                    save_errors.append(f"REST API: {str(rest_error)[:200]}")
-            
-            # 방법 3: pyrebase 방식으로 저장 시도 (마지막 시도)
-            if not saved_to_db:
-                try:
-                    print(f"🔍 데이터베이스 저장 시도 (pyrebase)")
-                    db.child("users").child(user_id).set(user_data)
-                    print(f"✓ 사용자 정보가 데이터베이스에 저장되었습니다. (UID: {user_id})")
-                    saved_to_db = True
-                except Exception as db_error:
-                    error_str = str(db_error)
-                    print(f"   pyrebase 오류: {error_str[:300]}")
-                    save_errors.append(f"pyrebase: {error_str[:200]}")
-            
-            # 저장 실패 시 오류 메시지 출력 및 로그인 차단
-            if not saved_to_db:
-                error_summary = "\n   ".join(save_errors)
-                error_msg = (
-                    f"❌ 데이터베이스 저장 실패!\n\n"
-                    f"시도한 방법들:\n   {error_summary}\n\n"
-                )
-                print(error_msg)
-                print(f"⚠ 저장 실패했지만 로그인은 계속 진행합니다...")
-                # 저장 실패해도 로그인은 계속 진행 (이미 저장되어 있을 수 있음)
-                # flash('데이터베이스에 정보를 저장할 수 없습니다. Firebase Console에서 규칙을 확인해주세요.', 'warning')
-            
-            # 저장 성공 여부와 관계없이 저장 확인
-            try:
-                import requests
-                verify_url = f"https://blog-cdc9b-default-rtdb.firebaseio.com/users/{user_id}.json"
-                verify_response = requests.get(verify_url, timeout=5)
-                if verify_response.status_code == 200:
-                    saved_data = verify_response.json()
-                    if saved_data:
-                        print(f"✓ 데이터베이스에 사용자 정보가 저장되어 있습니다.")
-                        print(f"   저장된 데이터: {json.dumps(saved_data, indent=2, ensure_ascii=False)[:300]}")
-                    else:
-                        print(f"⚠ 데이터베이스에 사용자 정보가 없습니다. 저장 시도...")
-                        # 다시 저장 시도
-                        final_save_url = f"https://blog-cdc9b-default-rtdb.firebaseio.com/users/{user_id}.json"
-                        final_response = requests.put(final_save_url, json=user_data, timeout=5)
-                        if final_response.status_code == 200:
-                            print(f"✓ 최종 저장 성공!")
-                        else:
-                            print(f"⚠ 최종 저장 실패: {final_response.status_code}")
-                else:
-                    print(f"⚠ 저장 확인 실패: {verify_response.status_code}")
-            except Exception as verify_error:
-                print(f"⚠ 저장 확인 중 오류: {str(verify_error)[:200]}")
+                print(f"⚠ Firestore 저장 실패했지만 로그인은 계속 진행합니다...")
             
             # 관리자 권한 확인
             if not user_data.get("is_admin", False):
@@ -302,31 +288,62 @@ def dashboard():
         return redirect(url_for('login'))
     
     try:
-        # 통계 데이터 수집 (데이터베이스 오류 처리)
-        users = {}
+        # 통계 데이터 수집 (Firestore에서 조회)
+        total_users = 0
+        pending_approvals = 0
         try:
-            users = db.child("users").get().val() or {}
+            import requests
+            project_id = "blog-cdc9b"
+            firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users"
+            
+            id_token = session.get('token')
+            if id_token:
+                headers = {
+                    "Authorization": f"Bearer {id_token}",
+                    "Content-Type": "application/json"
+                }
+                response = requests.get(firestore_url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    firestore_data = response.json()
+                    documents = firestore_data.get("documents", [])
+                    total_users = len(documents)
+                    pending_approvals = sum(1 for doc in documents 
+                                          if not doc.get("fields", {}).get("approved", {}).get("booleanValue", False))
         except Exception as db_error:
             # 데이터베이스가 없어도 빈 통계로 표시
-            print(f"⚠ 데이터베이스 조회 실패 (빈 통계 표시): {str(db_error)[:100]}")
+            print(f"⚠ Firestore 조회 실패 (빈 통계 표시): {str(db_error)[:100]}")
         
-        total_users = len(users) if users else 0
-        pending_approvals = sum(1 for u in users.values() if not u.get("approved", False)) if users else 0
-        pending_payments = sum(1 for u in users.values() if u.get("payment_pending", False)) if users else 0
-        
-        # 만료 예정 사용자 (7일 이내)
-        today = datetime.now()
+        # 결제 대기 및 만료 예정 사용자 계산
+        pending_payments = 0
         expiring_soon = 0
-        if users:
-            for u in users.values():
-                expiry_date = u.get("expiry_date")
-                if expiry_date:
-                    try:
-                        expiry = datetime.fromisoformat(expiry_date)
-                        if (expiry - today).days <= 7 and (expiry - today).days > 0:
-                            expiring_soon += 1
-                    except:
-                        pass
+        try:
+            if id_token:
+                headers = {
+                    "Authorization": f"Bearer {id_token}",
+                    "Content-Type": "application/json"
+                }
+                response = requests.get(firestore_url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    firestore_data = response.json()
+                    documents = firestore_data.get("documents", [])
+                    pending_payments = sum(1 for doc in documents 
+                                          if doc.get("fields", {}).get("payment_pending", {}).get("booleanValue", False))
+                    
+                    # 만료 예정 사용자 (7일 이내)
+                    today = datetime.now()
+                    for doc in documents:
+                        expiry_field = doc.get("fields", {}).get("expiry_date", {})
+                        if "timestampValue" in expiry_field:
+                            expiry_str = expiry_field["timestampValue"].replace("Z", "")
+                            try:
+                                expiry_date = datetime.fromisoformat(expiry_str)
+                                days_left = (expiry_date.replace(tzinfo=None) - today.replace(tzinfo=None)).days
+                                if 0 <= days_left <= 7:
+                                    expiring_soon += 1
+                            except:
+                                pass
+        except:
+            pass
         
         stats = {
             'total_users': total_users,
@@ -350,31 +367,144 @@ def dashboard():
 
 @app.route('/users')
 def users():
-    """회원 목록"""
+    """회원 목록 (Firestore에서 조회)"""
     if not check_admin():
         flash('로그인이 필요합니다.', 'error')
         return redirect(url_for('login'))
     
+    print(f"\n{'='*60}")
+    print(f"[회원 목록 조회] 시작")
+    print(f"   세션 정보: user_id={session.get('user_id')}, email={session.get('email')}")
+    print(f"   토큰 존재: {bool(session.get('token'))}")
+    print(f"{'='*60}\n")
+    
     try:
-        users_data = {}
-        try:
-            users_data = db.child("users").get().val() or {}
-        except Exception as db_error:
-            # 데이터베이스가 없어도 빈 목록 표시
-            print(f"⚠ 데이터베이스 조회 실패: {str(db_error)[:100]}")
-        
-        # 사용자 목록을 리스트로 변환
         users_list = []
-        if users_data:
-            for user_id, user_data in users_data.items():
-                user_data['user_id'] = user_id
-                users_list.append(user_data)
+        
+        # Firestore에서 사용자 목록 조회
+        try:
+            import requests
+            project_id = "blog-cdc9b"
+            firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users"
             
-            # 승인 상태와 날짜로 정렬
-            users_list.sort(key=lambda x: (
-                not x.get("approved", False),
-                x.get("created_at", "")
-            ), reverse=True)
+            # 세션에서 토큰 가져오기
+            id_token = session.get('token')
+            if not id_token:
+                print("⚠ 세션에 토큰이 없습니다.")
+                print(f"   세션 키: {list(session.keys())}")
+                flash('로그인이 필요합니다. 다시 로그인해주세요.', 'error')
+                return redirect(url_for('login'))
+            
+            print(f"✓ 세션에서 토큰 확인: {id_token[:20]}...")
+            
+            headers = {
+                "Authorization": f"Bearer {id_token}",
+                "Content-Type": "application/json"
+            }
+            
+            print(f"🔍 Firestore에서 사용자 목록 조회 시도")
+            print(f"   Project ID: {project_id}")
+            print(f"   URL: {firestore_url}")
+            print(f"   토큰 길이: {len(id_token)}")
+            
+            response = requests.get(firestore_url, headers=headers, timeout=10)
+            print(f"   HTTP 응답 코드: {response.status_code}")
+            print(f"   응답 헤더: {dict(response.headers)}")
+            print(f"   응답 본문 (처음 500자): {response.text[:500]}")
+            
+            if response.status_code == 200:
+                try:
+                    firestore_data = response.json()
+                    documents = firestore_data.get("documents", [])
+                    print(f"✓ Firestore에서 {len(documents)}명의 사용자 조회 성공")
+                    
+                    if len(documents) == 0:
+                        print("⚠ Firestore에 문서가 없습니다. 회원가입한 사용자가 없거나 Firestore에 저장되지 않았을 수 있습니다.")
+                except Exception as json_error:
+                    print(f"❌ JSON 파싱 실패: {str(json_error)}")
+                    print(f"   응답 본문: {response.text}")
+                    documents = []
+                
+                # Firestore 문서를 일반 딕셔너리로 변환
+                for doc in documents:
+                    doc_name = doc.get("name", "")
+                    # 문서 이름에서 user_id 추출: projects/.../documents/users/{user_id}
+                    user_id = doc_name.split("/")[-1] if "/" in doc_name else ""
+                    
+                    fields = doc.get("fields", {})
+                    
+                    # Firestore 필드를 일반 값으로 변환하는 헬퍼 함수
+                    def get_string_value(field_name, default=""):
+                        field = fields.get(field_name, {})
+                        if "stringValue" in field:
+                            return field["stringValue"]
+                        return default
+                    
+                    def get_bool_value(field_name, default=False):
+                        field = fields.get(field_name, {})
+                        if "booleanValue" in field:
+                            return field["booleanValue"]
+                        return default
+                    
+                    def get_timestamp_value(field_name, default=None):
+                        field = fields.get(field_name, {})
+                        if "nullValue" in field:
+                            return None
+                        if "timestampValue" in field:
+                            # Firestore timestamp 형식: "2025-11-06T18:07:10.205453Z"
+                            timestamp = field["timestampValue"]
+                            # ISO 형식으로 변환 (템플릿에서 사용하기 쉽게)
+                            return timestamp.replace("Z", "") if timestamp else None
+                        return default
+                    
+                    # Firestore 필드를 일반 값으로 변환
+                    user_data = {
+                        "user_id": user_id,
+                        "name": get_string_value("name", ""),
+                        "username": get_string_value("username", ""),
+                        "email": get_string_value("email", ""),
+                        "phone": get_string_value("phone", ""),
+                        "approved": get_bool_value("approved", False),
+                        "is_admin": get_bool_value("is_admin", False),
+                        "created_at": get_timestamp_value("created_at", ""),
+                        "expiry_date": get_timestamp_value("expiry_date"),
+                        "first_login_date": get_timestamp_value("first_login_date"),
+                        "approved_date": get_timestamp_value("approved_date"),
+                    }
+                    
+                    users_list.append(user_data)
+                    print(f"  Firestore 사용자 추가: {user_data.get('email')} - 승인: {user_data.get('approved')}")
+                
+                print(f"✓ {len(documents)}명의 Firestore 사용자 데이터 변환 완료")
+            else:
+                error_msg = f"Firestore 조회 실패: HTTP {response.status_code}"
+                print(f"❌ {error_msg}")
+                print(f"   응답 전체: {response.text}")
+                if response.status_code == 401:
+                    print("⚠ 인증 토큰이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.")
+                    flash('Firestore 인증 토큰이 만료되었습니다. 다시 로그인해주세요.', 'error')
+                    session.clear()
+                    return redirect(url_for('login'))
+                elif response.status_code == 403:
+                    print("⚠ Firestore 접근 권한이 없습니다.")
+                    print("   Firebase Console > Firestore Database > 규칙 탭에서 확인하세요.")
+                    flash('Firestore 접근 권한이 없습니다. Firebase Console에서 규칙을 확인해주세요.', 'error')
+                else:
+                    print(f"⚠ Firestore 조회 실패: HTTP {response.status_code}")
+                    flash(f'Firestore 조회 실패: HTTP {response.status_code}', 'error')
+        except Exception as firestore_error:
+            import traceback
+            print(f"❌ Firestore 조회 실패: {str(firestore_error)}")
+            traceback.print_exc()
+            flash(f'Firestore에서 회원 목록을 불러오는 중 오류가 발생했습니다.', 'warning')
+        
+        print(f"✓ 총 {len(users_list)}명의 사용자 정보 수집 완료 (Firestore)")
+        
+        # 승인 상태와 날짜로 정렬
+        users_list.sort(key=lambda x: (
+            not x.get("approved", False),
+            x.get("created_at", "")
+        ), reverse=True)
         
         # 오늘 날짜 전달
         today = datetime.now().isoformat()
@@ -382,26 +512,149 @@ def users():
         return render_template('users.html', users=users_list, today=today)
     
     except Exception as e:
-        flash(f'회원 목록을 불러오는 중 오류가 발생했습니다. (데이터베이스가 활성화되지 않았을 수 있습니다)', 'warning')
+        import traceback
+        print(f"❌ 회원 목록 조회 중 오류: {str(e)}")
+        traceback.print_exc()
+        flash(f'회원 목록을 불러오는 중 오류가 발생했습니다.', 'warning')
         return render_template('users.html', users=[], today=datetime.now().isoformat())
+
+
+# sync_users_to_database 함수는 더 이상 사용하지 않음 (Firestore만 사용)
 
 
 @app.route('/users/approve/<user_id>', methods=['POST'])
 def approve_user(user_id):
-    """회원 승인"""
+    """회원 승인 (Firestore에 저장)"""
     if not check_admin():
         return jsonify({'success': False, 'message': '권한이 없습니다.'}), 403
     
     try:
-        # 사용자 정보 업데이트
+        # 현재 날짜
+        now = datetime.now()
+        approved_date_iso = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        
+        # 승인일로부터 30일 후 만료일 계산
+        expiry_date_iso = (now + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        
+        # Firestore에 저장
         try:
-            db.child("users").child(user_id).update({
-                "approved": True
-            })
-            return jsonify({'success': True, 'message': '회원이 승인되었습니다.'})
+            import requests
+            project_id = "blog-cdc9b"
+            firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+            
+            # 세션에서 토큰 가져오기
+            id_token = session.get('token')
+            if not id_token:
+                return jsonify({'success': False, 'message': '로그인이 필요합니다.'}), 401
+            
+            headers = {
+                "Authorization": f"Bearer {id_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # 기존 사용자 정보 가져오기
+            existing_doc = None
+            try:
+                get_response = requests.get(firestore_url, headers=headers, timeout=5)
+                if get_response.status_code == 200:
+                    existing_doc = get_response.json()
+                    print(f"✓ 기존 사용자 정보 조회 성공")
+            except Exception as get_error:
+                print(f"⚠ 기존 사용자 정보 조회 실패: {str(get_error)}")
+            
+            # Firestore에 사용자 정보가 없는 경우, Firebase Authentication에서 기본 정보 가져오기
+            if not existing_doc or "fields" not in existing_doc:
+                print(f"⚠ Firestore에 사용자 정보가 없습니다. Firebase Authentication에서 기본 정보를 가져옵니다.")
+                # Firebase Authentication REST API로 사용자 정보 가져오기
+                try:
+                    # Firebase Admin SDK 없이도 Firebase Authentication REST API를 사용할 수 있지만,
+                    # 여기서는 기본값으로 사용자 정보를 생성합니다.
+                    # 실제로는 Firebase Admin SDK가 필요하지만, 일단 기본 정보로 생성합니다.
+                    print(f"   기본 사용자 정보로 Firestore 문서를 생성합니다.")
+                except Exception as auth_error:
+                    print(f"⚠ Firebase Authentication 정보 조회 실패: {str(auth_error)}")
+            
+            # 업데이트할 필드 준비
+            update_fields = {
+                "approved": {"booleanValue": True},
+                "approved_date": {"timestampValue": approved_date_iso}
+            }
+            
+            # 만료일이 없거나 이미 설정된 만료일이 과거인 경우에만 새로 설정
+            if existing_doc and "fields" in existing_doc:
+                existing_expiry = existing_doc["fields"].get("expiry_date", {})
+                if "nullValue" not in existing_expiry and "timestampValue" in existing_expiry:
+                    # 기존 만료일이 있는 경우 확인
+                    existing_expiry_str = existing_expiry["timestampValue"]
+                    try:
+                        existing_expiry_date = datetime.fromisoformat(existing_expiry_str.replace("Z", "+00:00").replace("+00:00", ""))
+                        if existing_expiry_date.replace(tzinfo=None) < now:
+                            # 만료일이 이미 지난 경우 새로 설정
+                            update_fields["expiry_date"] = {"timestampValue": expiry_date_iso}
+                    except:
+                        # 날짜 파싱 실패 시 새로 설정
+                        update_fields["expiry_date"] = {"timestampValue": expiry_date_iso}
+                else:
+                    # 만료일이 없는 경우 새로 설정
+                    update_fields["expiry_date"] = {"timestampValue": expiry_date_iso}
+            else:
+                # 사용자 정보가 없는 경우 만료일 설정
+                update_fields["expiry_date"] = {"timestampValue": expiry_date_iso}
+            
+            # Firestore 문서 업데이트 (기존 필드와 병합)
+            if existing_doc and "fields" in existing_doc:
+                # 기존 필드와 병합
+                merged_fields = {**existing_doc["fields"], **update_fields}
+            else:
+                # Firestore에 사용자 정보가 없는 경우, 기본 필드 생성
+                # user_id는 필수
+                merged_fields = {
+                    "user_id": {"stringValue": user_id},
+                    "approved": update_fields["approved"],
+                    "approved_date": update_fields["approved_date"],
+                    "expiry_date": update_fields["expiry_date"],
+                    "is_admin": {"booleanValue": False},
+                    "created_at": {"timestampValue": now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")},
+                    "first_login_date": {"nullValue": None},
+                    "last_payment_date": {"nullValue": None},
+                    "payment_pending": {"booleanValue": False},
+                    "login_history": {"mapValue": {"fields": {}}}
+                }
+                # 기존 필드가 있으면 병합
+                if existing_doc and "fields" in existing_doc:
+                    merged_fields = {**existing_doc["fields"], **merged_fields}
+            
+            firestore_doc = {
+                "fields": merged_fields
+            }
+            
+            # PATCH 메서드로 업데이트
+            print(f"🔍 Firestore 승인 정보 저장 시도: user_id={user_id}")
+            response = requests.patch(firestore_url, json=firestore_doc, headers=headers, timeout=10)
+            print(f"   HTTP 응답 코드: {response.status_code}")
+            
+            if response.status_code in [200, 201]:
+                print(f"✓ Firestore에 승인 정보 저장 성공")
+                return jsonify({
+                    'success': True, 
+                    'message': f'회원이 승인되었습니다. (승인일: {approved_date_iso[:10]}, 만료일: {expiry_date_iso[:10]})'
+                })
+            else:
+                error_msg = f"Firestore HTTP {response.status_code}: {response.text[:200]}"
+                print(f"❌ {error_msg}")
+                return jsonify({
+                    'success': False, 
+                    'message': f'Firestore 저장 실패: {error_msg[:100]}'
+                }), 500
         except Exception as db_error:
-            # 데이터베이스가 없어도 성공 메시지 반환 (세션 기반)
-            return jsonify({'success': True, 'message': '회원이 승인되었습니다. (데이터베이스 저장 실패)'})
+            import traceback
+            error_msg = str(db_error)
+            print(f"❌ Firestore 저장 실패: {error_msg}")
+            traceback.print_exc()
+            return jsonify({
+                'success': False, 
+                'message': f'데이터베이스 저장 실패: {error_msg[:100]}. Firebase Console에서 규칙을 확인해주세요.'
+            }), 500
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'오류가 발생했습니다: {str(e)}'}), 500
@@ -409,14 +662,254 @@ def approve_user(user_id):
 
 @app.route('/users/reject/<user_id>', methods=['POST'])
 def reject_user(user_id):
-    """회원 거부 (선택사항)"""
+    """회원 거부 (Firestore에서 rejected 상태로 업데이트)"""
     if not check_admin():
         return jsonify({'success': False, 'message': '권한이 없습니다.'}), 403
     
     try:
-        # 사용자 정보 업데이트 (또는 삭제)
-        # 여기서는 단순히 승인 상태를 유지하거나 메모를 추가할 수 있습니다
-        return jsonify({'success': True, 'message': '회원이 거부되었습니다.'})
+        import requests
+        project_id = "blog-cdc9b"
+        firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+        
+        id_token = session.get('token')
+        if not id_token:
+            return jsonify({'success': False, 'message': '로그인이 필요합니다.'}), 401
+        
+        headers = {
+            "Authorization": f"Bearer {id_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # 기존 사용자 정보 가져오기
+        existing_doc = None
+        try:
+            get_response = requests.get(firestore_url, headers=headers, timeout=5)
+            if get_response.status_code == 200:
+                existing_doc = get_response.json()
+        except Exception as get_error:
+            print(f"⚠ 기존 사용자 정보 조회 실패: {str(get_error)}")
+        
+        # 거부 상태로 업데이트
+        now = datetime.now()
+        now_iso = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        update_fields = {
+            "approved": {"booleanValue": False},
+            "rejected": {"booleanValue": True},
+            "rejected_date": {"timestampValue": now_iso}
+        }
+        
+        # 기존 필드와 병합
+        if existing_doc and "fields" in existing_doc:
+            merged_fields = {**existing_doc["fields"], **update_fields}
+        else:
+            merged_fields = update_fields
+        
+        firestore_doc = {
+            "fields": merged_fields
+        }
+        
+        # PATCH로 업데이트
+        print(f"🔍 Firestore 거부 정보 저장 시도: user_id={user_id}")
+        response = requests.patch(firestore_url, json=firestore_doc, headers=headers, timeout=10)
+        print(f"   HTTP 응답 코드: {response.status_code}")
+        
+        if response.status_code in [200, 201]:
+            print(f"✓ Firestore에 거부 정보 저장 성공")
+            return jsonify({
+                'success': True, 
+                'message': '회원이 거부되었습니다.'
+            })
+        else:
+            error_msg = f"Firestore HTTP {response.status_code}: {response.text[:200]}"
+            print(f"❌ {error_msg}")
+            return jsonify({
+                'success': False, 
+                'message': f'Firestore 저장 실패: {error_msg[:100]}'
+            }), 500
+    
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"❌ 회원 거부 실패: {error_msg}")
+        traceback.print_exc()
+        return jsonify({
+            'success': False, 
+            'message': f'오류가 발생했습니다: {error_msg[:100]}'
+        }), 500
+
+
+@app.route('/users/delete/<user_id>', methods=['POST'])
+def delete_user(user_id):
+    """회원 삭제 (Firestore에서 문서 삭제)"""
+    if not check_admin():
+        return jsonify({'success': False, 'message': '권한이 없습니다.'}), 403
+    
+    try:
+        import requests
+        project_id = "blog-cdc9b"
+        firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+        
+        id_token = session.get('token')
+        if not id_token:
+            return jsonify({'success': False, 'message': '로그인이 필요합니다.'}), 401
+        
+        headers = {
+            "Authorization": f"Bearer {id_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Firestore에서 문서 삭제
+        print(f"🔍 Firestore 사용자 삭제 시도: user_id={user_id}")
+        response = requests.delete(firestore_url, headers=headers, timeout=10)
+        print(f"   HTTP 응답 코드: {response.status_code}")
+        
+        if response.status_code == 200:
+            print(f"✓ Firestore에서 사용자 삭제 성공")
+            return jsonify({
+                'success': True, 
+                'message': '회원이 삭제되었습니다.'
+            })
+        elif response.status_code == 404:
+            # 이미 삭제된 경우
+            return jsonify({
+                'success': True, 
+                'message': '회원이 이미 삭제되었습니다.'
+            })
+        else:
+            error_msg = f"Firestore HTTP {response.status_code}: {response.text[:200]}"
+            print(f"❌ {error_msg}")
+            return jsonify({
+                'success': False, 
+                'message': f'Firestore 삭제 실패: {error_msg[:100]}'
+            }), 500
+    
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"❌ 회원 삭제 실패: {error_msg}")
+        traceback.print_exc()
+        return jsonify({
+            'success': False, 
+            'message': f'오류가 발생했습니다: {error_msg[:100]}'
+        }), 500
+
+
+@app.route('/users/update-expiry/<user_id>', methods=['POST'])
+def update_expiry_date(user_id):
+    """이용만료일 수정"""
+    print(f"🔍 만료일 수정 요청: user_id={user_id}")
+    
+    if not check_admin():
+        print("❌ 관리자 권한 없음")
+        return jsonify({'success': False, 'message': '권한이 없습니다.'}), 403
+    
+    try:
+        data = request.get_json()
+        print(f"📥 받은 데이터: {data}")
+        expiry_date = data.get('expiry_date', '').strip()
+        
+        if not expiry_date:
+            print("❌ 만료일이 없음")
+            return jsonify({'success': False, 'message': '만료일을 입력해주세요.'}), 400
+        
+        # 날짜 형식 검증
+        try:
+            datetime.fromisoformat(expiry_date)
+        except ValueError:
+            # YYYY-MM-DD 형식인지 확인
+            try:
+                datetime.strptime(expiry_date, '%Y-%m-%d')
+                # ISO 형식으로 변환 (시간 포함)
+                expiry_date = f"{expiry_date}T23:59:59"
+            except ValueError:
+                return jsonify({'success': False, 'message': '올바른 날짜 형식이 아닙니다. (YYYY-MM-DD)'}), 400
+        
+        # Firestore에 만료일 업데이트
+        try:
+            import requests
+            project_id = "blog-cdc9b"
+            firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+            
+            # 세션에서 토큰 가져오기
+            id_token = session.get('token')
+            if not id_token:
+                return jsonify({'success': False, 'message': '로그인이 필요합니다.'}), 401
+            
+            headers = {
+                "Authorization": f"Bearer {id_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # 기존 사용자 정보 가져오기
+            existing_doc = None
+            try:
+                get_response = requests.get(firestore_url, headers=headers, timeout=5)
+                if get_response.status_code == 200:
+                    existing_doc = get_response.json()
+                    print(f"✓ 기존 사용자 정보 조회 성공")
+            except Exception as get_error:
+                print(f"⚠ 기존 사용자 정보 조회 실패: {str(get_error)}")
+            
+            # 만료일을 Firestore timestamp 형식으로 변환
+            # expiry_date는 "YYYY-MM-DDTHH:MM:SS" 형식
+            expiry_timestamp = expiry_date.replace("T", "T").replace("Z", "")
+            if not expiry_timestamp.endswith("Z"):
+                expiry_timestamp = f"{expiry_timestamp}Z"
+            
+            # 업데이트할 필드
+            update_fields = {
+                "expiry_date": {"timestampValue": expiry_timestamp}
+            }
+            
+            # 기존 필드와 병합
+            if existing_doc and "fields" in existing_doc:
+                merged_fields = {**existing_doc["fields"], **update_fields}
+            else:
+                merged_fields = update_fields
+            
+            firestore_doc = {
+                "fields": merged_fields
+            }
+            
+            # PATCH 메서드로 업데이트
+            print(f"🔍 Firestore 만료일 저장 시도: user_id={user_id}, expiry_date={expiry_date}")
+            response = requests.patch(firestore_url, json=firestore_doc, headers=headers, timeout=10)
+            print(f"   HTTP 응답 코드: {response.status_code}")
+            print(f"   응답 내용: {response.text[:300]}")
+            
+            if response.status_code in [200, 201]:
+                print(f"✓ Firestore에 만료일 저장 성공")
+                # 저장 확인
+                verify_response = requests.get(firestore_url, headers=headers, timeout=5)
+                if verify_response.status_code == 200:
+                    saved_doc = verify_response.json()
+                    if saved_doc and "fields" in saved_doc:
+                        saved_expiry = saved_doc["fields"].get("expiry_date", {}).get("timestampValue", "")
+                        print(f"✓ 저장 확인: expiry_date={saved_expiry}")
+                        return jsonify({
+                            'success': True, 
+                            'message': f'이용만료일이 {expiry_date[:10]}로 변경되었습니다.'
+                        })
+                return jsonify({
+                    'success': True, 
+                    'message': f'이용만료일이 {expiry_date[:10]}로 변경되었습니다.'
+                })
+            else:
+                error_msg = f"Firestore HTTP {response.status_code}: {response.text[:200]}"
+                print(f"❌ {error_msg}")
+                return jsonify({
+                    'success': False, 
+                    'message': f'Firestore 저장 실패: {error_msg[:100]}'
+                }), 500
+        except Exception as db_error:
+            import traceback
+            error_msg = str(db_error)
+            print(f"❌ Firestore 저장 실패: {error_msg}")
+            traceback.print_exc()
+            return jsonify({
+                'success': False, 
+                'message': f'데이터베이스 업데이트 실패: {error_msg[:100]}. Firebase Console에서 규칙을 확인해주세요.'
+            }), 500
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'오류가 발생했습니다: {str(e)}'}), 500
@@ -430,27 +923,70 @@ def payments():
         return redirect(url_for('login'))
     
     try:
-        users_data = {}
+        # Firestore에서 사용자 및 결제 정보 조회
+        pending_payments = []
+        payments_list = []
         try:
-            users_data = db.child("users").get().val() or {}
+            import requests
+            project_id = "blog-cdc9b"
+            id_token = session.get('token')
+            
+            if id_token:
+                headers = {
+                    "Authorization": f"Bearer {id_token}",
+                    "Content-Type": "application/json"
+                }
+                
+                # 사용자 목록 조회
+                users_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users"
+                users_response = requests.get(users_url, headers=headers, timeout=10)
+                
+                if users_response.status_code == 200:
+                    users_data = users_response.json()
+                    documents = users_data.get("documents", [])
+                    
+                    for doc in documents:
+                        doc_name = doc.get("name", "")
+                        user_id = doc_name.split("/")[-1] if "/" in doc_name else ""
+                        fields = doc.get("fields", {})
+                        
+                        # 결제 대기 목록
+                        payment_pending = fields.get("payment_pending", {}).get("booleanValue", False)
+                        if payment_pending:
+                            user_data = {
+                                "user_id": user_id,
+                                "email": fields.get("email", {}).get("stringValue", ""),
+                                "name": fields.get("name", {}).get("stringValue", ""),
+                                "payment_pending": True
+                            }
+                            pending_payments.append(user_data)
+                
+                # 결제 내역 조회
+                payments_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/payments"
+                payments_response = requests.get(payments_url, headers=headers, timeout=10)
+                
+                if payments_response.status_code == 200:
+                    payments_data = payments_response.json()
+                    documents = payments_data.get("documents", [])
+                    
+                    for doc in documents:
+                        doc_name = doc.get("name", "")
+                        payment_id = doc_name.split("/")[-1] if "/" in doc_name else ""
+                        fields = doc.get("fields", {})
+                        
+                        payment_data = {
+                            "payment_id": payment_id,
+                            "user_id": fields.get("user_id", {}).get("stringValue", ""),
+                            "email": fields.get("email", {}).get("stringValue", ""),
+                            "name": fields.get("name", {}).get("stringValue", ""),
+                            "payment_date": fields.get("payment_date", {}).get("timestampValue", "").replace("Z", "") if "timestampValue" in fields.get("payment_date", {}) else "",
+                            "status": fields.get("status", {}).get("stringValue", ""),
+                            "expiry_date": fields.get("expiry_date", {}).get("timestampValue", "").replace("Z", "") if "timestampValue" in fields.get("expiry_date", {}) else ""
+                        }
+                        payments_list.append(payment_data)
         except Exception as db_error:
             # 데이터베이스가 없어도 빈 목록 표시
-            print(f"⚠ 데이터베이스 조회 실패: {str(db_error)[:100]}")
-        
-        # 결제 대기 목록
-        pending_payments = []
-        if users_data:
-            for user_id, user_data in users_data.items():
-                if user_data.get("payment_pending", False):
-                    user_data['user_id'] = user_id
-                    pending_payments.append(user_data)
-        
-        # 결제 내역 (payments 컬렉션에서 가져오기)
-        payments_data = db.child("payments").get().val() or {}
-        payments_list = []
-        for payment_id, payment_data in payments_data.items():
-            payment_data['payment_id'] = payment_id
-            payments_list.append(payment_data)
+            print(f"⚠ Firestore 조회 실패: {str(db_error)[:100]}")
         
         # 날짜순 정렬
         payments_list.sort(key=lambda x: x.get("payment_date", ""), reverse=True)
@@ -471,43 +1007,85 @@ def confirm_payment(user_id):
         return jsonify({'success': False, 'message': '권한이 없습니다.'}), 403
     
     try:
-        # 사용자 정보 가져오기
-        user_data = db.child("users").child(user_id).get().val()
+        import requests
+        project_id = "blog-cdc9b"
+        id_token = session.get('token')
         
-        if not user_data:
+        if not id_token:
+            return jsonify({'success': False, 'message': '로그인이 필요합니다.'}), 401
+        
+        headers = {
+            "Authorization": f"Bearer {id_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Firestore에서 사용자 정보 가져오기
+        user_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+        user_response = requests.get(user_url, headers=headers, timeout=5)
+        
+        if user_response.status_code != 200:
             return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
         
+        user_doc = user_response.json()
+        if "fields" not in user_doc:
+            return jsonify({'success': False, 'message': '사용자 정보를 찾을 수 없습니다.'}), 404
+        
+        fields = user_doc["fields"]
+        user_data = {
+            "email": fields.get("email", {}).get("stringValue", ""),
+            "name": fields.get("name", {}).get("stringValue", "")
+        }
+        
         # 현재 날짜로부터 30일 후로 만료일 설정
-        new_expiry_date = (datetime.now() + timedelta(days=30)).isoformat()
+        now = datetime.now()
+        new_expiry_date_iso = (now + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        last_payment_date_iso = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        payment_date_iso = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         
         # 사용자 정보 업데이트
-        update_data = {
-            "expiry_date": new_expiry_date,
-            "payment_pending": False,
-            "last_payment_date": datetime.now().isoformat()
+        update_fields = {
+            "expiry_date": {"timestampValue": new_expiry_date_iso},
+            "payment_pending": {"booleanValue": False},
+            "last_payment_date": {"timestampValue": last_payment_date_iso}
         }
         
-        db.child("users").child(user_id).update(update_data)
+        # 기존 필드와 병합
+        merged_fields = {**fields, **update_fields}
+        user_update_doc = {"fields": merged_fields}
+        
+        user_update_response = requests.patch(user_url, json=user_update_doc, headers=headers, timeout=10)
+        
+        if user_update_response.status_code not in [200, 201]:
+            return jsonify({'success': False, 'message': '사용자 정보 업데이트 실패'}), 500
         
         # 결제 내역 저장
-        payment_data = {
-            "user_id": user_id,
-            "email": user_data.get("email", ""),
-            "name": user_data.get("name", ""),
-            "payment_date": datetime.now().isoformat(),
-            "status": "confirmed",
-            "confirmed_by": session['user_id'],
-            "confirmed_at": datetime.now().isoformat(),
-            "expiry_date": new_expiry_date
+        payment_doc = {
+            "fields": {
+                "user_id": {"stringValue": user_id},
+                "email": {"stringValue": user_data.get("email", "")},
+                "name": {"stringValue": user_data.get("name", "")},
+                "payment_date": {"timestampValue": payment_date_iso},
+                "status": {"stringValue": "confirmed"},
+                "confirmed_by": {"stringValue": session.get('user_id', '')},
+                "confirmed_at": {"timestampValue": payment_date_iso},
+                "expiry_date": {"timestampValue": new_expiry_date_iso}
+            }
         }
         
-        db.child("payments").push(payment_data)
+        payments_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/payments"
+        payment_response = requests.post(payments_url, json=payment_doc, headers=headers, timeout=10)
         
-        return jsonify({
-            'success': True, 
-            'message': '결제가 확인되었습니다. 이용 기간이 30일 연장되었습니다.',
-            'expiry_date': new_expiry_date
-        })
+        if payment_response.status_code in [200, 201]:
+            return jsonify({
+                'success': True, 
+                'message': '결제가 확인되었습니다. 이용 기간이 30일 연장되었습니다.',
+                'expiry_date': new_expiry_date_iso[:10]  # 날짜만 반환
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'결제 내역 저장 실패: HTTP {payment_response.status_code}'
+            }), 500
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'오류가 발생했습니다: {str(e)}'}), 500
