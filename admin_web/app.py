@@ -81,6 +81,22 @@ def login():
             flash('이메일과 비밀번호를 입력해주세요.', 'error')
             return render_template('login.html')
         
+        # Firebase 인스턴스 확인
+        if auth is None or db is None:
+            flash('Firebase가 초기화되지 않았습니다. 서버 설정을 확인해주세요.', 'error')
+            print("⚠ Firebase 인스턴스가 None입니다. 초기화를 다시 시도합니다.")
+            try:
+                # 재초기화 시도
+                global auth_manager, db, auth
+                auth_manager = AuthManager()
+                db = get_db()
+                auth = get_auth()
+                print("✓ Firebase 재초기화 성공")
+            except Exception as init_error:
+                print(f"✗ Firebase 재초기화 실패: {init_error}")
+                flash(f'Firebase 초기화 오류: {str(init_error)}', 'error')
+                return render_template('login.html')
+        
         try:
             # Firebase Authentication 로그인
             user_info = auth.sign_in_with_email_and_password(email, password)
