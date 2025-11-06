@@ -16,37 +16,52 @@ class AuthManager:
         self.db = get_db()
         self.user = None
         self.token = None
+        # Vercel 서버리스 환경에서는 파일 시스템이 읽기 전용이므로
+        # 세션 파일 경로는 설정하지만 디렉토리 생성은 시도하지 않음
         self.session_file = Path(__file__).parent.parent / "data" / "session.json"
-        self.session_file.parent.mkdir(parents=True, exist_ok=True)
+        # 디렉토리 생성 시도 (실패해도 계속 진행)
+        try:
+            self.session_file.parent.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            # Vercel 등 읽기 전용 파일 시스템에서는 무시
+            print(f"⚠ 세션 디렉토리 생성 실패 (서버리스 환경일 수 있음): {str(e)}")
         self._load_session()
     
     def _load_session(self):
         """저장된 세션 로드 (자동 로그인)"""
-        if self.session_file.exists():
-            try:
-                with open(self.session_file, "r", encoding="utf-8") as f:
-                    session_data = json.load(f)
-                
-                if "token" in session_data and "user_id" in session_data:
-                    # 토큰 저장 및 사용자 정보 추출
-                    self.token = session_data["token"]
-                    user_id = session_data.get("user_id", "")
-                    email = session_data.get("email", "")
+        try:
+            if self.session_file.exists():
+                try:
+                    with open(self.session_file, "r", encoding="utf-8") as f:
+                        session_data = json.load(f)
                     
-                    # 간단한 사용자 정보 구조 생성
-                    self.user = {
-                        "users": [{
-                            "localId": user_id,
-                            "email": email
-                        }]
-                    }
-                    return True
-            except Exception:
-                self._clear_session()
+                    if "token" in session_data and "user_id" in session_data:
+                        # 토큰 저장 및 사용자 정보 추출
+                        self.token = session_data["token"]
+                        user_id = session_data.get("user_id", "")
+                        email = session_data.get("email", "")
+                        
+                        # 간단한 사용자 정보 구조 생성
+                        self.user = {
+                            "users": [{
+                                "localId": user_id,
+                                "email": email
+                            }]
+                        }
+                        return True
+                except (OSError, PermissionError, IOError) as e:
+                    # 파일 읽기 실패 (서버리스 환경 등)
+                    print(f"⚠ 세션 파일 읽기 실패: {str(e)}")
+                    return False
+                except Exception:
+                    self._clear_session()
+        except Exception as e:
+            # 파일 시스템 접근 실패는 무시 (서버리스 환경)
+            print(f"⚠ 세션 로드 실패 (무시됨): {str(e)}")
         return False
     
     def _save_session(self, token, user_id, email=None):
-        """세션 정보를 로컬 파일에 저장"""
+        """세션 정보를 로컬 파일에 저장 (서버리스 환경에서는 무시)"""
         session_data = {
             "token": token,
             "user_id": user_id,
@@ -59,16 +74,26 @@ class AuthManager:
         try:
             with open(self.session_file, "w", encoding="utf-8") as f:
                 json.dump(session_data, f, ensure_ascii=False, indent=2)
+        except (OSError, PermissionError, IOError) as e:
+            # Vercel 등 읽기 전용 파일 시스템에서는 무시
+            print(f"⚠ 세션 저장 실패 (서버리스 환경일 수 있음): {str(e)}")
         except Exception as e:
-            print(f"세션 저장 실패: {str(e)}")
+            print(f"⚠ 세션 저장 실패: {str(e)}")
     
     def _clear_session(self):
         """세션 정보 삭제"""
-        if self.session_file.exists():
-            try:
-                self.session_file.unlink()
-            except Exception:
-                pass
+        try:
+            if self.session_file.exists():
+                try:
+                    self.session_file.unlink()
+                except (OSError, PermissionError, IOError):
+                    # 파일 삭제 실패는 무시 (서버리스 환경)
+                    pass
+                except Exception:
+                    pass
+        except Exception:
+            # 파일 시스템 접근 실패는 무시
+            pass
         
         self.user = None
         self.token = None
