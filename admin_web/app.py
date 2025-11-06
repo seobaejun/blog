@@ -81,13 +81,14 @@ def login():
             flash('이메일과 비밀번호를 입력해주세요.', 'error')
             return render_template('login.html')
         
-        # Firebase 인스턴스 확인
+        # Firebase 인스턴스 확인 및 재초기화
+        global auth_manager, db, auth
+        
         if auth is None or db is None:
             flash('Firebase가 초기화되지 않았습니다. 서버 설정을 확인해주세요.', 'error')
             print("⚠ Firebase 인스턴스가 None입니다. 초기화를 다시 시도합니다.")
             try:
                 # 재초기화 시도
-                global auth_manager, db, auth
                 auth_manager = AuthManager()
                 db = get_db()
                 auth = get_auth()
