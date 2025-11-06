@@ -1,6 +1,5 @@
 """
 Vercel Serverless Function for Flask App
-Vercel은 WSGI 앱을 직접 지원합니다.
 """
 import sys
 from pathlib import Path
@@ -12,7 +11,7 @@ sys.path.insert(0, str(project_root))
 # Flask 앱 import
 from admin_web.app import app
 
-# Vercel은 WSGI 앱(app 객체)을 자동으로 처리합니다
-# app 객체를 export하면 Vercel이 WSGI로 인식합니다
+# Vercel Python 런타임은 app 객체를 자동으로 WSGI 앱으로 인식합니다
+# app 객체를 export하면 Vercel이 자동으로 처리합니다
 __all__ = ['app']
 

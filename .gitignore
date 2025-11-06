@@ -53,3 +53,4 @@ data/
 !config.json
 !firebase.json
 !.firebaserc
+!vercel.json
