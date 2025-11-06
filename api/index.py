@@ -32,14 +32,22 @@ except Exception as e:
 # Vercel 환경 설정
 os.environ.setdefault('FLASK_ENV', 'production')
 
+# 최소한의 테스트 앱 먼저 생성
+from flask import Flask
+test_app = Flask(__name__)
+
+@test_app.route('/')
+def test_root():
+    return '<h1>Vercel Flask Test</h1><p>기본 Flask 앱이 작동합니다!</p>'
+
 try:
     # Flask 앱 import
     log_error("Attempting to import Flask app...")
-    from admin_web.app import app
+    from admin_web.app import app as flask_app
     log_error("Flask app imported successfully")
     
-    # Vercel Python 런타임은 app 객체를 자동으로 WSGI 앱으로 인식합니다
-    # app 객체를 export하면 Vercel이 자동으로 처리합니다
+    # 실제 Flask 앱 사용
+    app = flask_app
     __all__ = ['app']
     
 except Exception as e:
