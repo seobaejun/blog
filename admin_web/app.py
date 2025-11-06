@@ -55,6 +55,13 @@ def check_admin():
     return False
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """favicon.ico 요청 처리 (404 반환)"""
+    from flask import abort
+    abort(404)
+
+
 @app.route('/')
 def index():
     """메인 페이지 리다이렉트"""
