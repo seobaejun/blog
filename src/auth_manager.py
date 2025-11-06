@@ -84,17 +84,15 @@ class AuthManager:
     def _clear_session(self):
         """세션 정보 삭제"""
         try:
-        if self.session_file.exists():
-            try:
-                self.session_file.unlink()
+            if self.session_file.exists():
+                try:
+                    self.session_file.unlink()
                 except (OSError, PermissionError, IOError):
                     # 파일 삭제 실패는 무시 (서버리스 환경)
                     pass
-            except Exception:
-                    pass
         except Exception:
             # 파일 시스템 접근 실패는 무시
-                pass
+            pass
         
         self.user = None
         self.token = None
