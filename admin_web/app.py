@@ -107,15 +107,14 @@ def login():
             return render_template('login.html')
         
         # Firebase 인스턴스 확인 및 재초기화
-        global auth_manager, db, auth
+        global auth_manager, auth
         
-        if auth is None or db is None:
+        if auth is None:
             flash('Firebase가 초기화되지 않았습니다. 서버 설정을 확인해주세요.', 'error')
             print("⚠ Firebase 인스턴스가 None입니다. 초기화를 다시 시도합니다.")
             try:
                 # 재초기화 시도
                 auth_manager = AuthManager()
-                # db = get_db()  # Realtime Database는 더 이상 사용하지 않음
                 auth = get_auth()
                 print("✓ Firebase 재초기화 성공")
             except Exception as init_error:
