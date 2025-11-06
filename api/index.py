@@ -6,91 +6,103 @@ import os
 from pathlib import Path
 import traceback
 
-# 에러 로깅을 위한 함수
-def log_error(msg, error=None):
-    """에러를 stderr에 출력 (Vercel 로그에서 확인 가능)"""
-    print(f"ERROR: {msg}", file=sys.stderr)
-    if error:
-        print(f"Exception: {error}", file=sys.stderr)
-        print(f"Traceback:\n{traceback.format_exc()}", file=sys.stderr)
+# 모든 출력을 stderr로 (Vercel 로그에서 확인 가능)
+def log(msg):
+    print(f"[VERCEL] {msg}", file=sys.stderr, flush=True)
+
+log("Starting Vercel function...")
 
 # 프로젝트 루트를 Python 경로에 추가
-project_root = None
-config_path = None
-
 try:
     project_root = Path(__file__).parent.parent
     sys.path.insert(0, str(project_root))
-    log_error(f"Project root added: {project_root}")
+    log(f"Project root: {project_root}")
     
     # config.json 경로 확인
     config_path = project_root / "config.json"
-    log_error(f"Config path: {config_path}, exists: {config_path.exists()}")
+    log(f"Config path: {config_path}, exists: {config_path.exists()}")
+    
+    # 파일 목록 확인
+    log(f"Files in project root: {list(project_root.iterdir())[:10]}")
 except Exception as e:
-    log_error("Failed to set project root", e)
+    log(f"Failed to set project root: {e}")
+    traceback.print_exc(file=sys.stderr)
 
 # Vercel 환경 설정
 os.environ.setdefault('FLASK_ENV', 'production')
 
-# 최소한의 테스트 앱 먼저 생성
-from flask import Flask
-test_app = Flask(__name__)
-
-@test_app.route('/')
-def test_root():
-    return '<h1>Vercel Flask Test</h1><p>기본 Flask 앱이 작동합니다!</p>'
-
+# Flask 앱 import 시도
+app = None
 try:
-    # Flask 앱 import
-    log_error("Attempting to import Flask app...")
-    from admin_web.app import app as flask_app
-    log_error("Flask app imported successfully")
+    log("Importing Flask...")
+    from flask import Flask
     
-    # 실제 Flask 앱 사용
+    log("Creating test Flask app...")
+    test_app = Flask(__name__)
+    
+    @test_app.route('/')
+    def test():
+        return '<h1>Vercel Flask Test</h1><p>기본 Flask 앱이 작동합니다!</p>'
+    
+    log("Attempting to import admin_web.app...")
+    from admin_web.app import app as flask_app
+    log("Flask app imported successfully!")
+    
     app = flask_app
-    __all__ = ['app']
     
 except Exception as e:
-    # 에러 발생 시 디버깅을 위한 간단한 앱 생성
-    log_error("Failed to import Flask app", e)
+    log(f"Error importing Flask app: {e}")
+    traceback.print_exc(file=sys.stderr)
     
+    # 에러 페이지 앱 생성
     try:
         from flask import Flask
-        
         error_app = Flask(__name__)
         
         @error_app.route('/', defaults={'path': ''})
         @error_app.route('/<path:path>')
         def error_handler(path):
-            error_msg = f"""
+            error_html = f"""
             <html>
             <head><title>Flask 앱 로드 오류</title></head>
-            <body>
+            <body style="font-family: Arial; padding: 20px;">
             <h1>Flask 앱 로드 오류</h1>
             <h2>에러 메시지:</h2>
-            <pre>{str(e)}</pre>
+            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px;">{str(e)}</pre>
             <h2>Traceback:</h2>
-            <pre>{traceback.format_exc()}</pre>
+            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto;">{traceback.format_exc()}</pre>
             <h2>디버깅 정보:</h2>
             <ul>
-            <li>Project root: {project_root}</li>
-            <li>Config path: {config_path}</li>
-            <li>Config exists: {config_path.exists()}</li>
-            <li>Python path: {sys.path}</li>
+            <li>Project root: {project_root if 'project_root' in locals() else 'N/A'}</li>
+            <li>Config path: {config_path if 'config_path' in locals() else 'N/A'}</li>
+            <li>Config exists: {config_path.exists() if 'config_path' in locals() else 'N/A'}</li>
+            <li>Python path: {sys.path[:5]}</li>
             </ul>
             </body>
             </html>
             """
-            return error_msg, 500
+            return error_html, 500
         
         app = error_app
-        __all__ = ['app']
-        log_error("Error app created")
-        
+        log("Error app created")
     except Exception as e2:
-        log_error("Failed to create error app", e2)
-        # 최후의 수단: 빈 Flask 앱
+        log(f"Failed to create error app: {e2}")
+        traceback.print_exc(file=sys.stderr)
+        # 최후의 수단
         from flask import Flask
         app = Flask(__name__)
-        __all__ = ['app']
+        @app.route('/')
+        def fallback():
+            return f'<h1>Fallback App</h1><p>Error: {str(e2)}</p>', 500
+
+if app is None:
+    log("CRITICAL: app is None, creating minimal Flask app")
+    from flask import Flask
+    app = Flask(__name__)
+    @app.route('/')
+    def minimal():
+        return '<h1>Minimal Flask App</h1><p>App was None</p>', 500
+
+log("App setup complete, exporting app object")
+__all__ = ['app']
 
