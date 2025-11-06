@@ -13,7 +13,7 @@ body {
 }
 
 .container {
-    max-width: 1600px;
+    max-width: 95%;
     margin: 0 auto;
     padding: 20px;
     width: 95%;
@@ -28,7 +28,7 @@ body {
 }
 
 .nav-container {
-    max-width: 1600px;
+    max-width: 95%;
     margin: 0 auto;
     padding: 0 20px;
     display: flex;

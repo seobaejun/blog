@@ -605,7 +605,10 @@ class AuthManager:
         
         except Exception as e:
             error_message = str(e)
-            if "INVALID_PASSWORD" in error_message or "EMAIL_NOT_FOUND" in error_message:
+            if error_message == "EXPIRY_DATE_EXPIRED":
+                # 이용만료일이 지난 경우 - 그대로 전달 (UI에서 입금 팝업 표시)
+                raise Exception("EXPIRY_DATE_EXPIRED")
+            elif "INVALID_PASSWORD" in error_message or "EMAIL_NOT_FOUND" in error_message:
                 raise Exception("로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.")
             elif "INVALID_EMAIL" in error_message:
                 raise Exception("유효하지 않은 이메일 형식입니다.")
