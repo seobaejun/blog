@@ -2,6 +2,7 @@
 Firebase 설정 및 초기화 모듈
 """
 import json
+import sys
 from pathlib import Path
 import pyrebase
 
@@ -19,28 +20,63 @@ class FirebaseConfig:
         self._initialize_firebase()
     
     def _load_config(self):
-        """config.json에서 Firebase 설정 로드"""
-        config_path = Path(__file__).parent.parent / "config.json"
+        """환경 변수 또는 config.json에서 Firebase 설정 로드"""
+        import os
         
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-            
-            if "firebase" not in config_data:
-                raise ValueError("Firebase 설정이 config.json에 없습니다.")
-            
-            self.config = config_data["firebase"]
-            
-            # databaseURL이 없으면 자동 생성
-            if "databaseURL" not in self.config:
-                project_id = self.config.get("projectId")
-                if project_id:
-                    self.config["databaseURL"] = f"https://{project_id}-default-rtdb.firebaseio.com"
+        # 환경 변수에서 Firebase 설정 로드 시도
+        firebase_config = {}
+        env_keys = {
+            'apiKey': 'FIREBASE_API_KEY',
+            'authDomain': 'FIREBASE_AUTH_DOMAIN',
+            'projectId': 'FIREBASE_PROJECT_ID',
+            'storageBucket': 'FIREBASE_STORAGE_BUCKET',
+            'messagingSenderId': 'FIREBASE_MESSAGING_SENDER_ID',
+            'appId': 'FIREBASE_APP_ID',
+            'measurementId': 'FIREBASE_MEASUREMENT_ID',
+            'databaseURL': 'FIREBASE_DATABASE_URL'
+        }
         
-        except FileNotFoundError:
-            raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {config_path}")
-        except json.JSONDecodeError:
-            raise ValueError(f"config.json 파일이 올바른 JSON 형식이 아닙니다.")
+        # 환경 변수에서 모든 값이 있는지 확인
+        env_available = all(os.getenv(key) for key in env_keys.values())
+        
+        if env_available:
+            # 환경 변수에서 로드
+            for config_key, env_key in env_keys.items():
+                value = os.getenv(env_key)
+                if value:
+                    firebase_config[config_key] = value
+            self.config = firebase_config
+            print("✓ Firebase 설정을 환경 변수에서 로드했습니다.")
+        else:
+            # config.json에서 로드
+            # exe로 빌드된 경우와 일반 실행 모두 지원
+            if getattr(sys, 'frozen', False):
+                # PyInstaller로 빌드된 경우
+                exe_dir = Path(sys.executable).parent
+                config_path = exe_dir / "config.json"
+            else:
+                # 일반 Python 실행
+                config_path = Path(__file__).parent.parent / "config.json"
+            
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                
+                if "firebase" not in config_data:
+                    raise ValueError("Firebase 설정이 config.json에 없습니다.")
+                
+                self.config = config_data["firebase"]
+                print("✓ Firebase 설정을 config.json에서 로드했습니다.")
+            except FileNotFoundError:
+                raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {config_path}\n설정 파일을 exe와 같은 폴더에 배치해주세요.")
+            except json.JSONDecodeError:
+                raise ValueError(f"config.json 파일이 올바른 JSON 형식이 아닙니다.")
+        
+        # databaseURL이 없으면 자동 생성
+        if "databaseURL" not in self.config:
+            project_id = self.config.get("projectId")
+            if project_id:
+                self.config["databaseURL"] = f"https://{project_id}-default-rtdb.firebaseio.com"
     
     def _initialize_firebase(self):
         """Firebase 초기화"""

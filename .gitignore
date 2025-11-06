@@ -54,3 +54,9 @@ data/
 !firebase.json
 !.firebaserc
 !vercel.json
+!config.json.example
+
+# Build artifacts
+dist/
+build/
+*.spec.bak
