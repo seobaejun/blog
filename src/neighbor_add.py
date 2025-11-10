@@ -1572,8 +1572,9 @@ class NeighborAdd:
                     print(error_msg)
                     # 오류가 발생해도 다음 작업으로 진행
             
-            # 공감만 체크되었거나 댓글만 체크된 경우 (이웃추가가 체크되지 않은 경우)
-            if (like_enabled or comment_enabled) and not include_neighbor:
+            # 공감만 체크되었거나 댓글만 체크된 경우 (이웃추가가 체크되지 않고 서로이웃만도 체크되지 않은 경우)
+            # mutual_only=True인 경우에는 서로이웃 추가를 시도해야 하므로 이 조건을 건너뜀
+            if (like_enabled or comment_enabled) and not include_neighbor and not mutual_only:
                 self.close_current_tab()
                 # 공감 성공 여부 확인
                 if like_enabled and like_success:
@@ -1693,7 +1694,15 @@ class NeighborAdd:
                     # 성공 여부 확인
                     if self.check_mutual_neighbor_success():
                         self.close_current_tab()
-                        return {'success': True, 'type': 'mutual'}
+                        result = {'success': True, 'type': 'mutual'}
+                        # 댓글 작성 여부 추가
+                        if comment_enabled and comment_success:
+                            result['comment_success'] = True
+                            if comment_result == "already_commented":
+                                result['comment_reason'] = '이미 작성된 댓글 있어 스킵'
+                            else:
+                                result['comment_reason'] = '댓글 작성 완료'
+                        return result
                     else:
                         # 서로이웃 실패 시 빠져나오기 (일반 이웃추가는 하지 않음)
                         self.close_current_tab()
@@ -1790,18 +1799,42 @@ class NeighborAdd:
                     # 서로이웃 성공 여부 확인
                     if self.check_mutual_neighbor_success():
                         self.close_current_tab()
-                        return {'success': True, 'type': 'mutual'}
+                        result = {'success': True, 'type': 'mutual'}
+                        # 댓글 작성 여부 추가
+                        if comment_enabled and comment_success:
+                            result['comment_success'] = True
+                            if comment_result == "already_commented":
+                                result['comment_reason'] = '이미 작성된 댓글 있어 스킵'
+                            else:
+                                result['comment_reason'] = '댓글 작성 완료'
+                        return result
                     
                     # 서로이웃 실패 시 이웃추가로 진행
                     time.sleep(1)
                     # 이미 이웃추가 버튼을 눌렀으므로 일반 이웃추가로 완료된 것으로 간주
                     self.close_current_tab()
-                    return {'success': True, 'type': 'neighbor'}
+                    result = {'success': True, 'type': 'neighbor'}
+                    # 댓글 작성 여부 추가
+                    if comment_enabled and comment_success:
+                        result['comment_success'] = True
+                        if comment_result == "already_commented":
+                            result['comment_reason'] = '이미 작성된 댓글 있어 스킵'
+                        else:
+                            result['comment_reason'] = '댓글 작성 완료'
+                    return result
                 else:
                     # 서로이웃 버튼이 없으면 일반 이웃추가로 완료 (이미 이웃추가 버튼을 눌렀으므로)
                     time.sleep(1)
                     self.close_current_tab()
-                    return {'success': True, 'type': 'neighbor'}
+                    result = {'success': True, 'type': 'neighbor'}
+                    # 댓글 작성 여부 추가
+                    if comment_enabled and comment_success:
+                        result['comment_success'] = True
+                        if comment_result == "already_commented":
+                            result['comment_reason'] = '이미 작성된 댓글 있어 스킵'
+                        else:
+                            result['comment_reason'] = '댓글 작성 완료'
+                    return result
         
         except Exception as e:
             # 에러 발생 시 페이지 닫기
@@ -1934,10 +1967,30 @@ class NeighborAdd:
                         success_count += 1
                         if result['type'] == 'mutual':
                             mutual_count += 1
-                            print(f"[{i}/{total_posts}] 서로이웃 추가 성공")
+                            log_msg = f"[{i}/{total_posts}] 서로이웃 추가 성공"
+                            # 댓글 작성 여부 확인
+                            if result.get('comment_success'):
+                                comment_reason = result.get('comment_reason', '댓글 작성 완료')
+                                log_msg += f" (댓글: {comment_reason})"
+                            print(log_msg)
+                            if log_callback:
+                                try:
+                                    log_callback(log_msg)
+                                except:
+                                    pass
                         elif result['type'] == 'neighbor':
                             neighbor_count += 1
-                            print(f"[{i}/{total_posts}] 일반 이웃추가 성공")
+                            log_msg = f"[{i}/{total_posts}] 일반 이웃추가 성공"
+                            # 댓글 작성 여부 확인
+                            if result.get('comment_success'):
+                                comment_reason = result.get('comment_reason', '댓글 작성 완료')
+                                log_msg += f" (댓글: {comment_reason})"
+                            print(log_msg)
+                            if log_callback:
+                                try:
+                                    log_callback(log_msg)
+                                except:
+                                    pass
                         elif result['type'] == 'like':
                             like_count += 1
                             log_msg = f"[{i}/{total_posts}] 공감 처리 성공"

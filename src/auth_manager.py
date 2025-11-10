@@ -370,7 +370,7 @@ class AuthManager:
     
     def check_approval_status(self, user_id):
         """
-        사용자 승인 상태 확인 (Firestore)
+        사용자 승인 상태 확인 (Realtime Database)
         
         Args:
             user_id: 사용자 ID
@@ -379,43 +379,117 @@ class AuthManager:
             dict: 승인 상태 정보
         """
         try:
-            # Firestore REST API로 승인 상태 확인
-            import requests
-            from src.firebase_config import get_firebase
-            firebase_config = get_firebase()
-            project_id = firebase_config.config.get("projectId", "blog-cdc9b")
-            firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
+            # Realtime Database에서 승인 상태 확인
+            print(f"🔍 승인 상태 확인 - user_id: {user_id}")
             
-            # 토큰이 없으면 기본값 반환
-            if not self.token:
+            if not self.db:
+                print("   ❌ Realtime Database 인스턴스가 없습니다.")
                 return {
                     "approved": False,
-                    "message": "인증 토큰이 없습니다."
+                    "message": "데이터베이스 연결 오류가 발생했습니다."
                 }
             
-            headers = {
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json"
-            }
-            
-            response = requests.get(firestore_url, headers=headers, timeout=5)
-            
-            if response.status_code == 200:
-                doc = response.json()
-                if "fields" in doc:
-                    approved = doc["fields"].get("approved", {}).get("booleanValue", False)
+            # Realtime Database에서 사용자 정보 가져오기
+            # pyrebase는 로그인 후 토큰을 사용해야 하므로, REST API를 직접 사용
+            user_info = None
+            try:
+                from src.firebase_config import get_firebase
+                firebase_config = get_firebase()
+                project_id = firebase_config.config.get("projectId", "blog-cdc9b")
+                database_url = firebase_config.config.get("databaseURL", f"https://{project_id}-default-rtdb.firebaseio.com")
+                
+                # REST API로 Realtime Database 접근
+                rtdb_url = f"{database_url}/users/{user_id}.json"
+                
+                # 토큰이 있으면 사용, 없으면 공개 읽기 시도
+                if self.token:
+                    rtdb_url += f"?auth={self.token}"
+                
+                import requests
+                response = requests.get(rtdb_url, timeout=5)
+                
+                if response.status_code == 200:
+                    user_info = response.json()
+                    if user_info:
+                        print(f"   Realtime Database에서 사용자 정보 조회 성공")
+                    else:
+                        print(f"   ⚠ Realtime Database에 사용자 정보가 없습니다 (null 응답)")
+                        return {
+                            "approved": False,
+                            "message": "사용자 정보를 찾을 수 없습니다."
+                        }
+                else:
+                    print(f"   ❌ Realtime Database 조회 실패 - HTTP {response.status_code}")
+                    print(f"   응답: {response.text[:200]}")
                     return {
-                        "approved": approved,
-                        "message": "관리자 승인 대기 중입니다." if not approved else "승인되었습니다."
+                        "approved": False,
+                        "message": f"데이터베이스 접근 실패 (HTTP {response.status_code})"
+                    }
+            except Exception as rtdb_error:
+                print(f"   ❌ Realtime Database 접근 오류: {str(rtdb_error)}")
+                # pyrebase 방식으로 폴백 시도
+                try:
+                    user_data = self.db.child("users").child(user_id).get()
+                    
+                    if user_data and user_data.val():
+                        user_info = user_data.val()
+                        print(f"   Realtime Database에서 사용자 정보 조회 성공 (pyrebase)")
+                    else:
+                        print(f"   ⚠ Realtime Database에 사용자 정보가 없습니다.")
+                        return {
+                            "approved": False,
+                            "message": "사용자 정보를 찾을 수 없습니다."
+                        }
+                except Exception as pyrebase_error:
+                    print(f"   ❌ pyrebase 접근 오류: {str(pyrebase_error)}")
+                    return {
+                        "approved": False,
+                        "message": f"데이터베이스 접근 실패: {str(pyrebase_error)}"
                     }
             
-            # 문서가 없거나 승인되지 않은 경우
-            return {
-                "approved": False,
-                "message": "사용자 정보를 찾을 수 없습니다." if response.status_code == 404 else "승인 상태 확인 실패"
-            }
+            if user_info:
+                approved = user_info.get("approved", False)
+                print(f"   approved 값: {approved}")
+                
+                # 만료일 확인
+                expiry_date = user_info.get("expiry_date")
+                if expiry_date:
+                    try:
+                        from datetime import datetime
+                        # ISO 형식 날짜 파싱
+                        if 'T' in expiry_date:
+                            expiry_date_obj = datetime.fromisoformat(expiry_date.replace('Z', '+00:00').replace('+00:00', ''))
+                        else:
+                            expiry_date_obj = datetime.strptime(expiry_date, '%Y-%m-%d')
+                        
+                        expiry_date_obj = expiry_date_obj.replace(tzinfo=None)
+                        current_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                        expiry_date_only = expiry_date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+                        
+                        if expiry_date_only < current_date:
+                            print(f"   ⚠ 이용 만료일이 지났습니다. (만료일: {expiry_date})")
+                            return {
+                                "approved": False,
+                                "message": "이용 만료일이 지났습니다. 관리자에게 문의해주세요."
+                            }
+                    except Exception as date_error:
+                        print(f"   ⚠ 만료일 파싱 오류 (무시됨): {str(date_error)}")
+                
+                return {
+                    "approved": approved,
+                    "message": "관리자 승인 대기 중입니다." if not approved else "승인되었습니다."
+                }
+            else:
+                print(f"   ⚠ Realtime Database에 사용자 정보가 없습니다.")
+                return {
+                    "approved": False,
+                    "message": "사용자 정보를 찾을 수 없습니다."
+                }
         
         except Exception as e:
+            import traceback
+            print(f"   ❌ 승인 상태 확인 중 오류 발생: {str(e)}")
+            traceback.print_exc()
             return {
                 "approved": False,
                 "message": f"승인 상태 확인 중 오류가 발생했습니다: {str(e)}"
@@ -445,45 +519,36 @@ class AuthManager:
             # 승인 상태 확인
             approval_status = self.check_approval_status(user_id)
             if not approval_status.get("approved", False):
-                raise Exception("관리자 승인이 필요합니다. 승인 후 다시 시도해주세요.")
+                raise Exception(approval_status.get("message", "관리자 승인이 필요합니다. 승인 후 다시 시도해주세요."))
             
-            # Firestore에서 사용자 정보 가져오기
+            # Realtime Database에서 사용자 정보 가져오기
             user_data = None
             try:
-                import requests
-                from src.firebase_config import get_firebase
-                firebase_config = get_firebase()
-                project_id = firebase_config.config.get("projectId", "blog-cdc9b")
-                firestore_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents/users/{user_id}"
-                
-                headers = {
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json"
-                }
-                
-                response = requests.get(firestore_url, headers=headers, timeout=5)
-                
-                if response.status_code == 200:
-                    doc = response.json()
-                    if "fields" in doc:
-                        fields = doc["fields"]
-                        # Firestore 필드를 일반 딕셔너리로 변환
+                if self.db:
+                    user_data_rtdb = self.db.child("users").child(user_id).get()
+                    if user_data_rtdb and user_data_rtdb.val():
+                        user_info = user_data_rtdb.val()
+                        # Realtime Database 데이터를 일반 딕셔너리로 변환
                         user_data = {
-                            "user_id": fields.get("user_id", {}).get("stringValue", user_id),
-                            "email": fields.get("email", {}).get("stringValue", email),
-                            "name": fields.get("name", {}).get("stringValue", ""),
-                            "username": fields.get("username", {}).get("stringValue", ""),
-                            "phone": fields.get("phone", {}).get("stringValue", ""),
-                            "approved": fields.get("approved", {}).get("booleanValue", False),
-                            "is_admin": fields.get("is_admin", {}).get("booleanValue", False),
-                            "created_at": fields.get("created_at", {}).get("timestampValue", "").replace("Z", "") if "timestampValue" in fields.get("created_at", {}) else "",
-                            "expiry_date": fields.get("expiry_date", {}).get("timestampValue", "").replace("Z", "") if "timestampValue" in fields.get("expiry_date", {}) else None,
-                            "approved_date": fields.get("approved_date", {}).get("timestampValue", "").replace("Z", "") if "timestampValue" in fields.get("approved_date", {}) else None,
-                            "first_login_date": fields.get("first_login_date", {}).get("timestampValue", "").replace("Z", "") if "timestampValue" in fields.get("first_login_date", {}) else None,
+                            "user_id": user_info.get("user_id", user_id),
+                            "email": user_info.get("email", email),
+                            "name": user_info.get("name", ""),
+                            "username": user_info.get("username", ""),
+                            "phone": user_info.get("phone", ""),
+                            "approved": user_info.get("approved", False),
+                            "is_admin": user_info.get("is_admin", False),
+                            "created_at": user_info.get("created_at", ""),
+                            "expiry_date": user_info.get("expiry_date"),
+                            "approved_date": user_info.get("approved_date"),
+                            "first_login_date": user_info.get("first_login_date"),
                         }
-                        print(f"✓ Firestore에서 사용자 정보 조회 성공")
+                        print(f"✓ Realtime Database에서 사용자 정보 조회 성공")
+                    else:
+                        print(f"⚠ Realtime Database에 사용자 정보가 없습니다.")
+                else:
+                    print(f"⚠ Realtime Database 인스턴스가 없습니다.")
             except Exception as get_error:
-                print(f"⚠ Firestore 사용자 정보 조회 실패: {str(get_error)}")
+                print(f"⚠ Realtime Database 사용자 정보 조회 실패: {str(get_error)}")
             
             # 이용만료일 확인
             if user_data and user_data.get("expiry_date"):
@@ -543,7 +608,27 @@ class AuthManager:
                     
                     update_data["expiry_date"] = expiry_date
                 
-                # Firestore에 업데이트
+                # Realtime Database에 업데이트
+                try:
+                    if self.db:
+                        # 기존 데이터 가져오기
+                        existing_user = self.db.child("users").child(user_id).get()
+                        if existing_user and existing_user.val():
+                            # 기존 데이터와 병합
+                            existing_data = existing_user.val()
+                            existing_data.update(update_data)
+                            self.db.child("users").child(user_id).set(existing_data)
+                        else:
+                            # 새로 생성
+                            update_data["user_id"] = user_id
+                            self.db.child("users").child(user_id).set(update_data)
+                        print(f"✓ Realtime Database에 첫 로그인 정보 업데이트 성공")
+                    else:
+                        print(f"⚠ Realtime Database 인스턴스가 없습니다.")
+                except Exception as update_error:
+                    print(f"⚠ Realtime Database 업데이트 실패: {str(update_error)}")
+                
+                # Firestore에도 업데이트 (호환성을 위해)
                 try:
                     import requests
                     from src.firebase_config import get_firebase

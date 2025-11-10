@@ -3,6 +3,8 @@
 Selenium을 사용하여 네이버 로그인 수행
 """
 import time
+import os
+import sys
 import pyperclip
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -48,9 +50,62 @@ class NaverLogin:
         # User-Agent 설정
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
         
-        # ChromeDriver 자동 설치 및 서비스 설정
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=options)
+        # ChromeDriver 경로 찾기
+        chromedriver_path = None
+        
+        # 1. EXE와 같은 디렉토리에서 chromedriver.exe 찾기
+        if getattr(sys, 'frozen', False):
+            # EXE로 빌드된 경우
+            exe_dir = os.path.dirname(sys.executable)
+            chromedriver_path = os.path.join(exe_dir, "chromedriver.exe")
+            if not os.path.exists(chromedriver_path):
+                chromedriver_path = None
+        else:
+            # Python 스크립트로 실행된 경우
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            chromedriver_path = os.path.join(script_dir, "chromedriver.exe")
+            if not os.path.exists(chromedriver_path):
+                chromedriver_path = None
+        
+        # 2. ChromeDriver 자동 설치 시도 (webdriver_manager 사용)
+        if not chromedriver_path:
+            try:
+                print("ChromeDriver 자동 다운로드 시도 중...")
+                chromedriver_path = ChromeDriverManager().install()
+                print(f"ChromeDriver 다운로드 완료: {chromedriver_path}")
+            except Exception as e:
+                print(f"⚠ ChromeDriver 자동 다운로드 실패: {str(e)}")
+                raise Exception(
+                    "ChromeDriver를 찾을 수 없습니다.\n\n"
+                    "해결 방법:\n"
+                    "1. Chrome 브라우저가 설치되어 있는지 확인하세요.\n"
+                    "2. 프로그램과 같은 폴더에 'chromedriver.exe' 파일을 배치하세요.\n"
+                    "3. 인터넷 연결을 확인하고 다시 시도하세요.\n"
+                    f"\n오류 상세: {str(e)}"
+                )
+        
+        # ChromeDriver 서비스 설정
+        try:
+            service = Service(chromedriver_path)
+            self.driver = webdriver.Chrome(service=service, options=options)
+        except Exception as e:
+            error_msg = str(e)
+            if "session not created" in error_msg.lower() or "chrome instance exited" in error_msg.lower():
+                raise Exception(
+                    "Chrome 브라우저를 시작할 수 없습니다.\n\n"
+                    "가능한 원인:\n"
+                    "1. Chrome 브라우저가 설치되어 있지 않습니다.\n"
+                    "2. Chrome 브라우저 버전과 ChromeDriver 버전이 맞지 않습니다.\n"
+                    "3. 다른 Chrome 프로세스가 실행 중입니다.\n"
+                    "4. Chrome 브라우저가 손상되었습니다.\n\n"
+                    "해결 방법:\n"
+                    "1. Chrome 브라우저를 최신 버전으로 업데이트하세요.\n"
+                    "2. 실행 중인 모든 Chrome 창을 닫고 다시 시도하세요.\n"
+                    "3. 컴퓨터를 재시작한 후 다시 시도하세요.\n"
+                    f"\n오류 상세: {error_msg}"
+                )
+            else:
+                raise Exception(f"브라우저 시작 실패: {error_msg}")
         
         # webdriver 속성 제거 (JavaScript 실행)
         self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {

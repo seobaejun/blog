@@ -257,16 +257,39 @@ def login():
         
         except Exception as e:
             import traceback
+            import json
             error_message = str(e)
             print(f"❌ 로그인 오류 발생: {error_message}")
             traceback.print_exc()
             
-            if "INVALID_PASSWORD" in error_message or "EMAIL_NOT_FOUND" in error_message:
+            # Firebase 인증 오류 메시지 추출 (JSON 응답에서)
+            firebase_error_code = None
+            try:
+                if "{" in error_message and "}" in error_message:
+                    # JSON 응답에서 오류 코드 추출 시도
+                    json_start = error_message.find("{")
+                    json_end = error_message.rfind("}") + 1
+                    if json_start >= 0 and json_end > json_start:
+                        error_json = json.loads(error_message[json_start:json_end])
+                        if "error" in error_json and "message" in error_json["error"]:
+                            firebase_error_code = error_json["error"]["message"]
+            except:
+                pass
+            
+            # Firebase 인증 오류 메시지 확인
+            if firebase_error_code:
+                if "INVALID_PASSWORD" in firebase_error_code or "EMAIL_NOT_FOUND" in firebase_error_code or "INVALID_LOGIN_CREDENTIALS" in firebase_error_code:
+                    flash('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.', 'error')
+                elif "INVALID_EMAIL" in firebase_error_code:
+                    flash('올바른 이메일 형식이 아닙니다.', 'error')
+                else:
+                    flash(f'로그인 오류: {firebase_error_code}', 'error')
+            elif "INVALID_PASSWORD" in error_message or "EMAIL_NOT_FOUND" in error_message or "INVALID_LOGIN_CREDENTIALS" in error_message:
                 flash('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.', 'error')
             elif "INVALID_EMAIL" in error_message:
                 flash('올바른 이메일 형식이 아닙니다.', 'error')
             else:
-                flash(f'로그인 중 오류가 발생했습니다: {error_message[:100]}', 'error')
+                flash('로그인 중 오류가 발생했습니다. 이메일과 비밀번호를 확인해주세요.', 'error')
     
     return render_template('login.html')
 
@@ -533,8 +556,38 @@ def users():
                                 print(f"  Realtime Database 사용자 추가: {user_info.get('email')} - 승인: {user_info.get('approved')}")
                             else:
                                 # 이미 Firestore에 있는 경우, Realtime Database 데이터로 업데이트 (최신 정보)
+                                # 단, approved 필드는 Firestore 값을 우선시 (Firestore가 더 정확한 승인 상태를 가지고 있음)
                                 for idx, existing_user in enumerate(users_list):
                                     if existing_user.get("user_id") == user_id:
+                                        # Firestore에서 가져온 approved 값 보존
+                                        firestore_approved = existing_user.get("approved", False)
+                                        rtdb_approved = user_data.get("approved", False)
+                                        
+                                        # Firestore에서 approved: true인데 Realtime Database에서 approved: false인 경우 동기화
+                                        if firestore_approved and not rtdb_approved:
+                                            print(f"  🔄 승인 상태 동기화 필요: {user_id} (Firestore=True, Realtime=False)")
+                                            try:
+                                                # Realtime Database에 승인 정보 동기화
+                                                sync_data = user_data.copy()
+                                                sync_data["approved"] = True
+                                                sync_data["rejected"] = False
+                                                
+                                                # Firestore의 승인일과 만료일도 동기화
+                                                if existing_user.get("approved_date"):
+                                                    sync_data["approved_date"] = existing_user.get("approved_date")
+                                                if existing_user.get("expiry_date"):
+                                                    sync_data["expiry_date"] = existing_user.get("expiry_date")
+                                                if existing_user.get("first_login_date"):
+                                                    sync_data["first_login_date"] = existing_user.get("first_login_date")
+                                                
+                                                db.child("users").child(user_id).set(sync_data)
+                                                print(f"  ✓ Realtime Database 승인 상태 동기화 완료: {user_id}")
+                                                
+                                                # users_list도 업데이트
+                                                user_data = sync_data
+                                            except Exception as sync_error:
+                                                print(f"  ⚠ 동기화 실패: {str(sync_error)}")
+                                        
                                         # Realtime Database 데이터로 업데이트 (빈 값이 아닌 경우만)
                                         if user_data.get("name"):
                                             users_list[idx]["name"] = user_data.get("name")
@@ -542,13 +595,13 @@ def users():
                                             users_list[idx]["username"] = user_data.get("username")
                                         if user_data.get("phone"):
                                             users_list[idx]["phone"] = user_data.get("phone")
-                                        if "approved" in user_data:
-                                            users_list[idx]["approved"] = user_data.get("approved")
+                                        # approved는 Firestore 값을 유지 (Realtime Database 값으로 덮어쓰지 않음)
+                                        # users_list[idx]["approved"]는 이미 Firestore 값으로 설정되어 있음
                                         if "is_admin" in user_data:
                                             users_list[idx]["is_admin"] = user_data.get("is_admin")
                                         if user_data.get("expiry_date"):
                                             users_list[idx]["expiry_date"] = user_data.get("expiry_date")
-                                        print(f"  Realtime Database 데이터로 업데이트: {user_id}")
+                                        print(f"  Realtime Database 데이터로 업데이트: {user_id} (승인 상태: Firestore={firestore_approved} 유지)")
                                         break
                     else:
                         print("⚠ Realtime Database에 사용자 데이터가 없습니다.")
@@ -638,8 +691,19 @@ def approve_user(user_id):
             # 업데이트할 필드 준비
             update_fields = {
                 "approved": {"booleanValue": True},
-                "approved_date": {"timestampValue": approved_date_iso}
+                "approved_date": {"timestampValue": approved_date_iso},
+                "rejected": {"booleanValue": False}  # 승인 시 거부 상태 해제
             }
+            
+            # first_login_date가 없으면 현재 날짜로 설정 (승인 시 즉시 이용 가능하도록)
+            if existing_doc and "fields" in existing_doc:
+                existing_first_login = existing_doc["fields"].get("first_login_date", {})
+                if "nullValue" in existing_first_login or "timestampValue" not in existing_first_login:
+                    # first_login_date가 없으면 현재 날짜로 설정
+                    update_fields["first_login_date"] = {"timestampValue": approved_date_iso}
+            else:
+                # 사용자 정보가 없는 경우 first_login_date 설정
+                update_fields["first_login_date"] = {"timestampValue": approved_date_iso}
             
             # 만료일이 없거나 이미 설정된 만료일이 과거인 경우에만 새로 설정
             if existing_doc and "fields" in existing_doc:
@@ -664,8 +728,10 @@ def approve_user(user_id):
             
             # Firestore 문서 업데이트 (기존 필드와 병합)
             if existing_doc and "fields" in existing_doc:
-                # 기존 필드와 병합
+                # 기존 필드와 병합 (update_fields가 나중에 오므로 덮어씀)
                 merged_fields = {**existing_doc["fields"], **update_fields}
+                # rejected 필드가 명시적으로 False로 설정되도록 보장
+                merged_fields["rejected"] = {"booleanValue": False}
             else:
                 # Firestore에 사용자 정보가 없는 경우, 기본 필드 생성
                 # user_id는 필수
@@ -676,7 +742,7 @@ def approve_user(user_id):
                     "expiry_date": update_fields["expiry_date"],
                     "is_admin": {"booleanValue": False},
                     "created_at": {"timestampValue": now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")},
-                    "first_login_date": {"nullValue": None},
+                    "first_login_date": update_fields.get("first_login_date", {"timestampValue": approved_date_iso}),
                     "last_payment_date": {"nullValue": None},
                     "payment_pending": {"booleanValue": False},
                     "login_history": {"mapValue": {"fields": {}}}
@@ -696,6 +762,78 @@ def approve_user(user_id):
             
             if response.status_code in [200, 201]:
                 print(f"✓ Firestore에 승인 정보 저장 성공")
+                
+                # 저장된 데이터 확인 (디버깅용)
+                try:
+                    verify_response = requests.get(firestore_url, headers=headers, timeout=5)
+                    if verify_response.status_code == 200:
+                        verify_doc = verify_response.json()
+                        if "fields" in verify_doc:
+                            saved_approved = verify_doc["fields"].get("approved", {}).get("booleanValue", False)
+                            saved_rejected = verify_doc["fields"].get("rejected", {}).get("booleanValue", True)
+                            print(f"   저장 확인 - approved: {saved_approved}, rejected: {saved_rejected}")
+                except Exception as verify_error:
+                    print(f"⚠ 저장 확인 실패: {str(verify_error)}")
+                
+                # Realtime Database에도 승인 정보 저장 (클라이언트 프로그램 호환성)
+                rtdb_success = False
+                try:
+                    if db is not None:
+                        print(f"🔍 Realtime Database 승인 정보 저장 시도: user_id={user_id}")
+                        # Realtime Database 형식으로 변환
+                        rtdb_data = {
+                            "approved": True,
+                            "approved_date": approved_date_iso.replace("Z", ""),
+                            "expiry_date": expiry_date_iso.replace("Z", ""),
+                            "first_login_date": approved_date_iso.replace("Z", ""),
+                            "rejected": False  # 승인 시 거부 상태 해제
+                        }
+                        
+                        # 기존 데이터가 있으면 업데이트, 없으면 새로 생성
+                        existing_user = db.child("users").child(user_id).get()
+                        if existing_user and existing_user.val():
+                            # 기존 데이터와 병합
+                            existing_data = existing_user.val()
+                            # approved와 rejected는 반드시 덮어쓰기
+                            existing_data["approved"] = True
+                            existing_data["rejected"] = False
+                            # 나머지 필드 업데이트
+                            existing_data.update({
+                                "approved_date": rtdb_data["approved_date"],
+                                "expiry_date": rtdb_data["expiry_date"],
+                                "first_login_date": rtdb_data["first_login_date"]
+                            })
+                            db.child("users").child(user_id).set(existing_data)
+                            print(f"✓ Realtime Database에 승인 정보 업데이트 성공")
+                        else:
+                            # 새로 생성
+                            rtdb_data["user_id"] = user_id
+                            db.child("users").child(user_id).set(rtdb_data)
+                            print(f"✓ Realtime Database에 승인 정보 생성 성공")
+                        
+                        # 저장 확인 (잠시 대기 후 확인)
+                        import time
+                        time.sleep(0.5)  # Realtime Database 동기화 대기
+                        verify_user = db.child("users").child(user_id).get()
+                        if verify_user and verify_user.val():
+                            verified_approved = verify_user.val().get("approved", False)
+                            print(f"   저장 확인 - approved: {verified_approved}")
+                            if not verified_approved:
+                                print(f"   ⚠ 경고: Realtime Database에 approved가 False로 저장되었습니다!")
+                                # 다시 시도
+                                print(f"   재시도: approved를 True로 강제 설정")
+                                retry_data = verify_user.val().copy()
+                                retry_data["approved"] = True
+                                retry_data["rejected"] = False
+                                db.child("users").child(user_id).set(retry_data)
+                                print(f"   재시도 완료")
+                        
+                        rtdb_success = True
+                    else:
+                        print("⚠ Realtime Database 인스턴스가 없습니다.")
+                except Exception as rtdb_error:
+                    print(f"⚠ Realtime Database 저장 실패: {str(rtdb_error)}")
+                
                 return jsonify({
                     'success': True, 
                     'message': f'회원이 승인되었습니다. (승인일: {approved_date_iso[:10]}, 만료일: {expiry_date_iso[:10]})'
